@@ -136,6 +136,7 @@ export interface CodexHost {
   platform?: string | null;
   hostname?: string | null;
   capabilities?: string[];
+  approvedRoots?: string[];
   authenticated?: boolean | null;
   accountType?: string | null;
   error?: string | null;
