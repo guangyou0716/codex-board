@@ -9,9 +9,11 @@
     "dev": "vinext dev",
     "build": "vinext build",
     "start": "vinext start",
-    "test": "npm run build && node --test tests/rendered-html.test.mjs",
+    "test": "npm run build && node --experimental-strip-types --test tests/rendered-html.test.mjs tests/bridge.test.mjs",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
-    "db:generate": "drizzle-kit generate"
+    "db:generate": "drizzle-kit generate",
+    "bridge:start": "node --experimental-strip-types bridge/server.ts",
+    "codex:schema": "codex app-server generate-ts --experimental --out bridge/generated/codex-app-server"
   },
   "dependencies": {
     "drizzle-orm": "0.45.2",

@@ -32,7 +32,7 @@ test("server-renders Codex Board", async () => {
 
   const html = await response.text();
   assert.match(html, /<title>Codex Board<\/title>/i);
-  assert.match(html, /Local Codex host offline/);
+  assert.match(html, /Mock adapter/);
   assert.match(html, /API-128/);
   assert.doesNotMatch(html, /Your site is taking shape|react-loading-skeleton/i);
 });
@@ -52,7 +52,7 @@ test("keeps the private dashboard boundary explicit", async () => {
   assert.match(page, /MockCodexAdapter/);
   assert.match(page, /\/api\/state/);
   assert.match(adapter, /class LocalCodexAdapter/);
-  assert.match(adapter, /Local Codex host offline/);
+  assert.match(adapter, /provider = "local"/);
   assert.match(route, /ensureDatabase/);
   assert.match(schema, /board_state/);
   assert.match(css, /--bg:\s*#fdf6e3/);

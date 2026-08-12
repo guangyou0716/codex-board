@@ -9,11 +9,16 @@ export const TASK_STATUSES = [
 
 export type TaskStatus = (typeof TASK_STATUSES)[number];
 export type Priority = "Low" | "Medium" | "High" | "Urgent";
-export type ReasoningEffort = "Minimal" | "Low" | "Medium" | "High";
+export type ReasoningEffort = string;
+export type ExecutionProvider = "mock" | "local";
 export type CodexStatus =
   | "idle"
   | "queued"
+  | "connecting"
   | "running"
+  | "waitingApproval"
+  | "interrupted"
+  | "offline"
   | "completed"
   | "failed"
   | "stopped";
@@ -38,6 +43,11 @@ export interface Repository {
   createdAt: string;
   updatedAt: string;
   connectionState: "connected" | "unavailable" | "unknown";
+  currentBranch?: string | null;
+  remote?: string | null;
+  dirty?: boolean | null;
+  lastCommit?: string | null;
+  lastSeen?: string | null;
 }
 
 export interface Task {
@@ -59,6 +69,10 @@ export interface Task {
   branch: string;
   codexThreadId: string | null;
   codexSessionId: string | null;
+  currentTurnId: string | null;
+  cwd: string | null;
+  forkedFromThreadId: string | null;
+  lastActivityAt: string | null;
   codexStatus: CodexStatus;
   createdAt: string;
   updatedAt: string;
@@ -85,6 +99,13 @@ export interface ActivityEvent {
   additions?: number;
   deletions?: number;
   output?: string;
+  threadId?: string;
+  turnId?: string;
+  itemId?: string;
+  requestId?: string;
+  reason?: string;
+  availableDecisions?: string[];
+  approvalDecision?: string;
 }
 
 export interface UsageSnapshot {
@@ -95,20 +116,35 @@ export interface UsageSnapshot {
   tokensToday: string | null;
   plan: string | null;
   isMock: boolean;
+  source: ExecutionProvider;
+  primaryUsed?: number | null;
+  secondaryUsed?: number | null;
+  lifetimeTokens?: string | null;
+  peakDailyTokens?: string | null;
+  unavailableReason?: string | null;
 }
 
 export interface CodexHost {
   id: string;
   name: string;
-  status: "connected" | "connecting" | "offline" | "auth_required" | "version_mismatch";
+  status: "connected" | "connecting" | "offline" | "auth_required" | "version_mismatch" | "degraded" | "error";
   version: string | null;
   lastSeen: string | null;
   isMock: boolean;
+  bridgeVersion?: string | null;
+  codexVersion?: string | null;
+  platform?: string | null;
+  hostname?: string | null;
+  capabilities?: string[];
+  authenticated?: boolean | null;
+  accountType?: string | null;
+  error?: string | null;
 }
 
 export interface Settings {
   approvedRoots: string[];
   theme: "dark" | "light";
+  provider: ExecutionProvider;
 }
 
 export interface AppState {
@@ -126,6 +162,17 @@ export interface ModelOption {
   name: string;
   defaultReasoningEffort: ReasoningEffort;
   supportedReasoningEfforts: ReasoningEffort[];
+}
+
+export interface DiscoveredRepository {
+  name: string;
+  localPath: string;
+  remote: string | null;
+  currentBranch: string | null;
+  defaultBranch: string | null;
+  dirty: boolean | null;
+  lastCommit: string | null;
+  lastSeen: string;
 }
 
 const ago = (minutes: number) =>
@@ -166,6 +213,10 @@ const task = (input: Partial<Task> & Pick<Task, "id" | "displayId" | "title" | "
   branch: "main",
   codexThreadId: null,
   codexSessionId: null,
+  currentTurnId: null,
+  cwd: null,
+  forkedFromThreadId: null,
+  lastActivityAt: null,
   codexStatus: "idle",
   createdAt: ago(2_880),
   updatedAt: ago(14),
@@ -436,10 +487,12 @@ export function createSeedState(): AppState {
       tokensToday: "18.4M",
       plan: "Codex Pro",
       isMock: true,
+      source: "mock",
     },
     settings: {
       approvedRoots: ["/Users/me/Development", "/Users/me/Work"],
       theme: "light",
+      provider: "mock",
     },
     updatedAt: new Date().toISOString(),
   };
@@ -447,4 +500,23 @@ export function createSeedState(): AppState {
 
 export function getRepository(state: AppState, repositoryId: string) {
   return state.repositories.find((repository) => repository.id === repositoryId);
+}
+
+export function normalizeAppState(value: AppState): AppState {
+  const seed = createSeedState();
+  return {
+    ...seed,
+    ...value,
+    host: { ...seed.host, ...value.host },
+    usage: { ...seed.usage, ...value.usage, source: value.usage.source ?? (value.usage.isMock ? "mock" : "local") },
+    settings: { ...seed.settings, ...value.settings, provider: value.settings.provider ?? "mock" },
+    repositories: value.repositories.map((repository) => ({ ...repository })),
+    tasks: value.tasks.map((task) => ({
+      ...task,
+      currentTurnId: task.currentTurnId ?? null,
+      cwd: task.cwd ?? null,
+      forkedFromThreadId: task.forkedFromThreadId ?? null,
+      lastActivityAt: task.lastActivityAt ?? null,
+    })),
+  };
 }
