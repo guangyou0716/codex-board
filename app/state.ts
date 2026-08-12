@@ -439,7 +439,7 @@ export function createSeedState(): AppState {
     },
     settings: {
       approvedRoots: ["/Users/me/Development", "/Users/me/Work"],
-      theme: "dark",
+      theme: "light",
     },
     updatedAt: new Date().toISOString(),
   };
@@ -448,4 +448,3 @@ export function createSeedState(): AppState {
 export function getRepository(state: AppState, repositoryId: string) {
   return state.repositories.find((repository) => repository.id === repositoryId);
 }
-

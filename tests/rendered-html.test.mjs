@@ -55,6 +55,8 @@ test("keeps the private dashboard boundary explicit", async () => {
   assert.match(adapter, /Local Codex host offline/);
   assert.match(route, /ensureDatabase/);
   assert.match(schema, /board_state/);
+  assert.match(css, /--bg:\s*#fdf6e3/);
+  assert.match(css, /--accent:\s*#268bd2/);
   assert.match(css, /prefers-reduced-motion:\s*reduce/);
   assert.doesNotMatch(page, /SkeletonPreview|react-loading-skeleton|_sites-preview/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
