@@ -117,6 +117,11 @@ const formatWindowDuration = (minutes: number | null | undefined) => {
   if (minutes % 60 === 0) return `${minutes / 60}-hour`;
   return `${minutes}-minute`;
 };
+const usageDateLabel = (date: string | null | undefined) => {
+  if (!date || date === new Date().toISOString().slice(0, 10)) return "Today";
+  const parsed = new Date(`${date}T00:00:00Z`);
+  return Number.isNaN(parsed.getTime()) ? "Latest reported day" : `Reported ${new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", timeZone: "UTC" }).format(parsed)}`;
+};
 
 const isSeedRepository = (repository: AppState["repositories"][number]) => repository.localPath.startsWith("/Users/me/");
 const isSeedTask = (task: Task) => /^task-(api|web|mob|inf)-\d+$/.test(task.id);
@@ -136,7 +141,8 @@ function mapUsageSnapshot(rateLimits: unknown, usage: unknown): Partial<UsageSna
   const buckets = Array.isArray(usagePayload.dailyUsageBuckets) ? usagePayload.dailyUsageBuckets.map(asRecord) : [];
   const today = new Date().toISOString().slice(0, 10);
   const todayBucket = buckets.find((bucket) => bucket.startDate === today);
-  const hasData = primaryUsed != null || secondaryUsed != null || todayBucket != null || summary.lifetimeTokens != null || summary.peakDailyTokens != null;
+  const reportedBucket = todayBucket ?? buckets[buckets.length - 1];
+  const hasData = primaryUsed != null || secondaryUsed != null || reportedBucket != null || summary.lifetimeTokens != null || summary.peakDailyTokens != null;
 
   return {
     primaryRemaining: primaryUsed == null ? null : Math.max(0, Math.min(100, 100 - primaryUsed)),
@@ -147,7 +153,8 @@ function mapUsageSnapshot(rateLimits: unknown, usage: unknown): Partial<UsageSna
     secondaryReset: formatReset(secondary.resetsAt),
     primaryWindowDurationMins: finiteNumber(primary.windowDurationMins),
     secondaryWindowDurationMins: finiteNumber(secondary.windowDurationMins),
-    tokensToday: buckets.length > 0 ? compactTokens(todayBucket?.tokens ?? 0) : null,
+    tokensToday: reportedBucket ? compactTokens(reportedBucket.tokens) : null,
+    tokensDate: typeof reportedBucket?.startDate === "string" ? reportedBucket.startDate : null,
     lifetimeTokens: compactTokens(summary.lifetimeTokens),
     peakDailyTokens: compactTokens(summary.peakDailyTokens),
     plan: typeof snapshot.planType === "string" ? snapshot.planType : null,
@@ -312,7 +319,7 @@ function UsagePage({ state }: { state: AppState }) {
   const usagePending = state.settings.provider === "local" && state.host.status === "connecting";
   const primaryWindow = formatWindowDuration(usage.primaryWindowDurationMins);
   const secondaryWindow = formatWindowDuration(usage.secondaryWindowDurationMins);
-  return <section className="page-section usage-page"><div className="page-heading-row"><div><h1>Usage</h1><span className="save-status">Account and rate-limit snapshots</span></div><span className="mock-label">{usage.isMock ? "Mock usage snapshot" : "Connected host"}</span></div>{usageUnavailable ? <div className="empty-state panel"><Icon name="usage" size={24} /><strong>{usagePending ? "Waiting for local Codex usage data" : usage.unavailableReason ?? "Usage information unavailable from the connected Codex host."}</strong><span>{usagePending ? "The connected host will populate this view when its snapshot is ready." : "Check the bridge connection in Settings and try again."}</span></div> : <><div className="usage-hero panel"><div><span className="usage-overline">Codex</span><h2>{formatPlanName(usage.plan)}</h2><p>{usage.isMock ? "Mock rate-limit data is shown for offline UI development." : "Only values returned by the connected Codex host are shown."}</p></div><div className="usage-hero-value"><strong>{usage.primaryRemaining ?? "—"}%</strong><span>primary remaining</span></div></div><div className="usage-window-grid"><UsageWindow label={primaryWindow ? `${primaryWindow} primary window` : "Primary window"} remaining={usage.primaryRemaining} reset={usage.primaryReset} /><UsageWindow label={secondaryWindow ? `${secondaryWindow} secondary window` : "Secondary window"} remaining={usage.secondaryRemaining} reset={usage.secondaryReset} /></div><div className="usage-stat-grid"><div className="panel"><span>Today</span><strong>{usage.tokensToday ?? "—"}</strong><small>tokens used</small></div><div className="panel"><span>Lifetime</span><strong>{usage.lifetimeTokens ?? "—"}</strong><small>tokens used</small></div><div className="panel"><span>Peak day</span><strong>{usage.peakDailyTokens ?? "—"}</strong><small>tokens used</small></div></div></>}</section>;
+  return <section className="page-section usage-page"><div className="page-heading-row"><div><h1>Usage</h1><span className="save-status">Account and rate-limit snapshots</span></div><span className="mock-label">{usage.isMock ? "Mock usage snapshot" : "Connected host"}</span></div>{usageUnavailable ? <div className="empty-state panel"><Icon name="usage" size={24} /><strong>{usagePending ? "Waiting for local Codex usage data" : usage.unavailableReason ?? "Usage information unavailable from the connected Codex host."}</strong><span>{usagePending ? "The connected host will populate this view when its snapshot is ready." : "Check the bridge connection in Settings and try again."}</span></div> : <><div className="usage-hero panel"><div><span className="usage-overline">Codex</span><h2>{formatPlanName(usage.plan)}</h2><p>{usage.isMock ? "Mock rate-limit data is shown for offline UI development." : "Only values returned by the connected Codex host are shown."}</p></div><div className="usage-hero-value"><strong>{usage.primaryRemaining ?? "—"}%</strong><span>primary remaining</span></div></div><div className="usage-window-grid"><UsageWindow label={primaryWindow ? `${primaryWindow} primary window` : "Primary window"} remaining={usage.primaryRemaining} reset={usage.primaryReset} /><UsageWindow label={secondaryWindow ? `${secondaryWindow} secondary window` : "Secondary window"} remaining={usage.secondaryRemaining} reset={usage.secondaryReset} /></div><div className="usage-stat-grid"><div className="panel"><span>{usageDateLabel(usage.tokensDate)}</span><strong>{usage.tokensToday ?? "—"}</strong><small>tokens used</small></div><div className="panel"><span>Lifetime</span><strong>{usage.lifetimeTokens ?? "—"}</strong><small>tokens used</small></div><div className="panel"><span>Peak day</span><strong>{usage.peakDailyTokens ?? "—"}</strong><small>tokens used</small></div></div></>}</section>;
 }
 
 function UsageWindow({ label, remaining, reset }: { label: string; remaining: number | null; reset: string | null }) {

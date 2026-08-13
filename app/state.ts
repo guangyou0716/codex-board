@@ -117,6 +117,7 @@ export interface UsageSnapshot {
   primaryWindowDurationMins?: number | null;
   secondaryWindowDurationMins?: number | null;
   tokensToday: string | null;
+  tokensDate?: string | null;
   plan: string | null;
   isMock: boolean;
   source: ExecutionProvider;
