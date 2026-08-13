@@ -83,6 +83,7 @@ export interface BridgeTaskConfig {
   cwd: string;
   model: string;
   effort: string;
+  serviceTier?: "fast";
   approvalPolicy: "unlessTrusted" | "onRequest" | "never";
   sandboxMode: "workspaceWrite" | "readOnly";
   networkAccess: "disabled" | "enabled";

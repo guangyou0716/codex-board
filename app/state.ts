@@ -64,6 +64,7 @@ export interface Task {
   modelId: string;
   modelName: string;
   reasoningEffort: ReasoningEffort;
+  fastMode: boolean;
   approvalPolicy: "unlessTrusted" | "onRequest" | "never";
   sandboxMode: "workspaceWrite" | "readOnly";
   networkAccess: "disabled" | "enabled";
@@ -230,6 +231,7 @@ const task = (input: Partial<Task> & Pick<Task, "id" | "displayId" | "title" | "
   modelId: "gpt-5.6-sol",
   modelName: "GPT-5.6 Sol",
   reasoningEffort: "High",
+  fastMode: false,
   approvalPolicy: "unlessTrusted",
   sandboxMode: "workspaceWrite",
   networkAccess: "disabled",
@@ -538,6 +540,7 @@ export function normalizeAppState(value: AppState): AppState {
     repositories: value.repositories.map((repository) => ({ ...repository })),
     tasks: value.tasks.map((task) => ({
       ...task,
+      fastMode: task.fastMode ?? false,
       currentTurnId: task.currentTurnId ?? null,
       cwd: task.cwd ?? null,
       forkedFromThreadId: task.forkedFromThreadId ?? null,

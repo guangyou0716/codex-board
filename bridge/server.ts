@@ -47,8 +47,9 @@ function parseConfig(value: unknown): BridgeTaskConfig {
   const approval = record.approvalPolicy === "onRequest" || record.approvalPolicy === "never" ? record.approvalPolicy : "unlessTrusted";
   const sandbox = record.sandboxMode === "readOnly" ? "readOnly" : "workspaceWrite";
   const network = record.networkAccess === "enabled" ? "enabled" : "disabled";
+  const serviceTier = record.serviceTier === "fast" ? "fast" : undefined;
   if (typeof record.cwd !== "string" || typeof record.model !== "string" || typeof record.effort !== "string") throw new Error("cwd, model, and effort are required.");
-  return { cwd: record.cwd, model: record.model, effort: record.effort, approvalPolicy: approval, sandboxMode: sandbox, networkAccess: network };
+  return { cwd: record.cwd, model: record.model, effort: record.effort, serviceTier, approvalPolicy: approval, sandboxMode: sandbox, networkAccess: network };
 }
 
 class BridgeService {

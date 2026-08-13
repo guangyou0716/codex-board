@@ -50,6 +50,8 @@ test("keeps the private dashboard boundary explicit", async () => {
 
   assert.match(layout, /title: "Codex Board"/);
   assert.match(page, /MockCodexAdapter/);
+  assert.match(page, /FastModeToggle/);
+  assert.match(page, /serviceTier/);
   assert.match(page, /\/api\/state/);
   assert.match(adapter, /class LocalCodexAdapter/);
   assert.match(adapter, /provider = "local"/);

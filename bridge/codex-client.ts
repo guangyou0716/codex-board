@@ -194,6 +194,7 @@ export class CodexAppServerClient {
   async startThread(config: BridgeTaskConfig) {
     const response = await this.process.request<ThreadStartResponse>("thread/start", {
       model: config.model,
+      serviceTier: config.serviceTier,
       cwd: config.cwd,
       runtimeWorkspaceRoots: [config.cwd],
       approvalPolicy: approvalPolicy(config.approvalPolicy),
@@ -206,6 +207,7 @@ export class CodexAppServerClient {
   async resumeThread(threadId: string, config: BridgeTaskConfig) {
     const response = await this.process.request<ThreadResumeResponse>("thread/resume", {
       threadId,
+      serviceTier: config.serviceTier,
       cwd: config.cwd,
       runtimeWorkspaceRoots: [config.cwd],
       approvalPolicy: approvalPolicy(config.approvalPolicy),
@@ -218,6 +220,7 @@ export class CodexAppServerClient {
   async forkThread(threadId: string, config: BridgeTaskConfig) {
     const response = await this.process.request<ThreadForkResponse>("thread/fork", {
       threadId,
+      serviceTier: config.serviceTier,
       cwd: config.cwd,
       runtimeWorkspaceRoots: [config.cwd],
       approvalPolicy: approvalPolicy(config.approvalPolicy),
@@ -236,6 +239,7 @@ export class CodexAppServerClient {
       approvalPolicy: approvalPolicy(config.approvalPolicy),
       sandboxPolicy: sandboxPolicy(config),
       model: config.model,
+      serviceTier: config.serviceTier,
       effort: normalizedEffort(config.effort),
     });
     return { turnId: response.turn.id };

@@ -277,3 +277,4 @@ h1 { font-size: 28px; line-height: 1.1; letter-spacing: -.055em; font-weight: 66
 .thread-task--plain > strong { color: var(--accent); font-family: var(--font-mono-ui); font-size: 10px; }
 .thread-task--plain > span { display: block; margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .thread-unlinked { color: var(--faint); text-align: center; }
+.fast-mode-toggle { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 12px; padding: 10px 11px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface-2); cursor: pointer; }.fast-mode-toggle strong, .fast-mode-toggle small { display: block; }.fast-mode-toggle strong { color: var(--text); font-size: 11px; }.fast-mode-toggle small { margin-top: 3px; color: var(--muted); font-size: 10px; }.fast-mode-toggle input { width: 16px; height: 16px; margin: 0; accent-color: var(--accent); cursor: pointer; }
