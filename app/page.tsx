@@ -21,6 +21,7 @@ import {
   type ReasoningEffort,
   type Task,
   type TaskStatus,
+  type UsageSnapshot,
 } from "./state";
 
 type View = "Dashboard" | "Board" | "Repositories" | "Codex Threads" | "Usage" | "Settings";
@@ -87,6 +88,66 @@ const idFor = (prefix: string) =>
   `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 
 const formatEffort = (effort: string) => effort.length ? effort[0].toUpperCase() + effort.slice(1).toLowerCase() : "Unavailable";
+const formatPlanName = (plan: string | null | undefined) => plan?.toLowerCase() === "plus" ? "ChatGPT Plus" : plan ?? "Codex account";
+
+type JsonRecord = Record<string, unknown>;
+
+const asRecord = (value: unknown): JsonRecord => value && typeof value === "object" ? value as JsonRecord : {};
+const finiteNumber = (value: unknown) => {
+  const number = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
+  return Number.isFinite(number) ? number : null;
+};
+const compactTokens = (value: unknown) => {
+  const number = finiteNumber(value);
+  return number == null ? null : new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(number);
+};
+const formatReset = (value: unknown) => {
+  const resetAt = finiteNumber(value);
+  if (resetAt == null) return null;
+  const minutes = Math.max(0, Math.ceil((resetAt * 1000 - Date.now()) / 60_000));
+  if (minutes < 1) return "now";
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  return hours < 24 ? `${hours}h ${minutes % 60}m` : `${Math.floor(hours / 24)}d ${hours % 24}h`;
+};
+const formatWindowDuration = (minutes: number | null | undefined) => {
+  if (minutes == null) return null;
+  if (minutes % 1_440 === 0) return `${minutes / 1_440}-day`;
+  if (minutes % 60 === 0) return `${minutes / 60}-hour`;
+  return `${minutes}-minute`;
+};
+
+function mapUsageSnapshot(rateLimits: unknown, usage: unknown): Partial<UsageSnapshot> {
+  const ratePayload = asRecord(rateLimits);
+  const snapshots = asRecord(ratePayload.rateLimitsByLimitId);
+  const snapshot = asRecord(snapshots.codex ?? ratePayload.rateLimits);
+  const primary = asRecord(snapshot.primary);
+  const secondary = asRecord(snapshot.secondary);
+  const primaryUsed = finiteNumber(primary.usedPercent);
+  const secondaryUsed = finiteNumber(secondary.usedPercent);
+  const usagePayload = asRecord(usage);
+  const summary = asRecord(usagePayload.summary);
+  const buckets = Array.isArray(usagePayload.dailyUsageBuckets) ? usagePayload.dailyUsageBuckets.map(asRecord) : [];
+  const today = new Date().toISOString().slice(0, 10);
+  const todayBucket = buckets.find((bucket) => bucket.startDate === today);
+  const hasData = primaryUsed != null || secondaryUsed != null || todayBucket != null || summary.lifetimeTokens != null || summary.peakDailyTokens != null;
+
+  return {
+    primaryRemaining: primaryUsed == null ? null : Math.max(0, Math.min(100, 100 - primaryUsed)),
+    secondaryRemaining: secondaryUsed == null ? null : Math.max(0, Math.min(100, 100 - secondaryUsed)),
+    primaryUsed,
+    secondaryUsed,
+    primaryReset: formatReset(primary.resetsAt),
+    secondaryReset: formatReset(secondary.resetsAt),
+    primaryWindowDurationMins: finiteNumber(primary.windowDurationMins),
+    secondaryWindowDurationMins: finiteNumber(secondary.windowDurationMins),
+    tokensToday: buckets.length > 0 ? compactTokens(todayBucket?.tokens ?? 0) : null,
+    lifetimeTokens: compactTokens(summary.lifetimeTokens),
+    peakDailyTokens: compactTokens(summary.peakDailyTokens),
+    plan: typeof snapshot.planType === "string" ? snapshot.planType : null,
+    unavailableReason: hasData ? null : "Usage information unavailable from the connected Codex host.",
+  };
+}
 
 function activityFromStream(taskId: string, event: CodexStreamEvent): Omit<ActivityEvent, "id" | "taskId" | "timestamp"> {
   const type: ActivityEvent["type"] = event.type === "turn_completed" ? "completed" : event.type === "approval" ? "approval" : event.type === "approval_resolved" ? "completed" : event.type === "command" ? "command" : event.type === "file" || event.type === "diff" ? "file" : event.type === "error" ? "error" : event.type === "tool" ? "tool" : "agent";
@@ -158,7 +219,7 @@ function Sidebar({ view, onView, state, onAddTask }: { view: View; onView: (view
     </nav>
     <div className="sidebar-bottom">
       <div className="offline-card"><HostBadge state={state} /><span>{state.settings.provider === "mock" ? "Mock execution data" : state.host.error ?? "Bridge diagnostics"}</span></div>
-      <div className="account-card"><div><span className="account-avatar">CP</span><span>{state.usage.plan ?? "Codex account"}</span></div><strong>{state.usage.primaryRemaining ?? "—"}% <small>remaining</small></strong><div className="mini-progress"><span style={{ width: `${state.usage.primaryRemaining ?? 0}%` }} /></div></div>
+      <div className="account-card"><div><span className="account-avatar">CP</span><span>{formatPlanName(state.usage.plan)}</span></div><strong>{state.usage.primaryRemaining ?? "—"}% <small>remaining</small></strong><div className="mini-progress"><span style={{ width: `${state.usage.primaryRemaining ?? 0}%` }} /></div></div>
       <button className="sidebar-add" onClick={onAddTask}><Icon name="plus" size={15} />Add task <kbd>N</kbd></button>
     </div>
   </aside>;
@@ -168,7 +229,7 @@ function TopBar({ state, view, onAddTask, onView }: { state: AppState; view: Vie
   return <header className="topbar">
     <div className="mobile-brand"><BrandMark /><span>Codex Board</span></div>
     <div className="topbar-context"><span className="topbar-eyebrow">Workspace</span><strong>{view}</strong></div>
-    <div className="topbar-actions"><HostBadge state={state} /><span className="account-pill"><span className="account-avatar">CP</span><span>Codex Pro</span><Icon name="chevron" size={14} /></span><button className="topbar-add pressable" onClick={onAddTask}><Icon name="plus" size={16} /><span>Add task</span></button></div>
+    <div className="topbar-actions"><HostBadge state={state} /><span className="account-pill"><span className="account-avatar">CP</span><span>{formatPlanName(state.usage.plan)}</span><Icon name="chevron" size={14} /></span><button className="topbar-add pressable" onClick={onAddTask}><Icon name="plus" size={16} /><span>Add task</span></button></div>
     <button className="mobile-menu" aria-label="Open navigation" onClick={() => onView(view === "Board" ? "Dashboard" : "Board")}><Icon name="menu" /></button>
   </header>;
 }
@@ -225,7 +286,8 @@ function DashboardPage({ state, onView, onSelectTask }: { state: AppState; onVie
   const counts = Object.fromEntries(TASK_STATUSES.map((status) => [status, state.tasks.filter((task) => task.status === status).length]));
   const activeThreads = state.tasks.filter((task) => task.codexStatus === "running").length;
   const dirtyRepos = state.repositories.filter((repo) => state.tasks.some((task) => task.repositoryId === repo.id && task.status !== "Done")).length;
-  return <section className="page-section dashboard-page"><div className="page-heading-row"><div><h1>Dashboard</h1><span className="save-status">Your local work, in one view</span></div><button className="ghost-button" onClick={() => onView("Board")}>Open board <Icon name="arrow" size={15} /></button></div><OfflineBanner state={state} /><div className="metric-grid"><button onClick={() => onView("Board")}><span>Ready</span><strong>{counts.Ready}</strong><small>tasks waiting</small></button><button onClick={() => onView("Board")}><span>Running</span><strong className="metric-indigo">{counts.Running}</strong><small>{activeThreads} active Codex threads</small></button><button onClick={() => onView("Board")}><span>Review</span><strong className="metric-violet">{counts.Review}</strong><small>awaiting your eyes</small></button><button onClick={() => onView("Board")}><span>Blocked</span><strong className="metric-coral">{counts.Blocked}</strong><small>need attention</small></button></div><div className="dashboard-grid"><section className="panel"><div className="section-title-row"><h2>Repositories</h2><button onClick={() => onView("Repositories")}>Manage <Icon name="arrow" size={13} /></button></div><div className="repo-summary-list">{state.repositories.map((repo) => <button key={repo.id} onClick={() => onView("Repositories")}><span className="repo-symbol">{repo.name.slice(0, 1).toUpperCase()}</span><span><strong>{repo.name}</strong><small>{repo.githubRepo}</small></span><span className="repo-summary-count">{state.tasks.filter((task) => task.repositoryId === repo.id).length} tasks</span></button>)}</div></section><section className="panel usage-summary"><div className="section-title-row"><h2>Usage</h2><button onClick={() => onView("Usage")}>Details <Icon name="arrow" size={13} /></button></div><div className="usage-ring-row"><div className="usage-ring" style={{ "--usage": `${state.usage.primaryRemaining ?? 0}%` } as React.CSSProperties}><strong>{state.usage.primaryRemaining ?? "—"}%</strong><span>remaining</span></div><div><strong>{state.usage.plan ?? "Codex"}</strong><span>5-hour window</span><small>Reset {state.usage.primaryReset ?? "unavailable"}</small></div></div><div className="usage-bar"><span style={{ width: `${state.usage.primaryRemaining ?? 0}%` }} /></div></section></div><section className="panel dashboard-activity"><div className="section-title-row"><h2>Recent activity</h2><span className="section-muted">{dirtyRepos} repos with active work</span></div><div className="activity-list">{state.activity.slice(0, 5).map((event) => { const task = state.tasks.find((candidate) => candidate.id === event.taskId); return <button key={event.id} onClick={() => task && onSelectTask(task.id)}><span className={`activity-icon activity-${event.type}`}><Icon name={event.type === "test" ? "test" : event.type === "approval" ? "approval" : event.type === "completed" ? "check" : "agent"} size={14} /></span><span><strong>{task?.displayId}</strong>{event.summary}</span><time>{timeAgo(event.timestamp)}</time></button>; })}</div></section></section>;
+  const primaryWindow = formatWindowDuration(state.usage.primaryWindowDurationMins);
+  return <section className="page-section dashboard-page"><div className="page-heading-row"><div><h1>Dashboard</h1><span className="save-status">Your local work, in one view</span></div><button className="ghost-button" onClick={() => onView("Board")}>Open board <Icon name="arrow" size={15} /></button></div><OfflineBanner state={state} /><div className="metric-grid"><button onClick={() => onView("Board")}><span>Ready</span><strong>{counts.Ready}</strong><small>tasks waiting</small></button><button onClick={() => onView("Board")}><span>Running</span><strong className="metric-indigo">{counts.Running}</strong><small>{activeThreads} active Codex threads</small></button><button onClick={() => onView("Board")}><span>Review</span><strong className="metric-violet">{counts.Review}</strong><small>awaiting your eyes</small></button><button onClick={() => onView("Board")}><span>Blocked</span><strong className="metric-coral">{counts.Blocked}</strong><small>need attention</small></button></div><div className="dashboard-grid"><section className="panel"><div className="section-title-row"><h2>Repositories</h2><button onClick={() => onView("Repositories")}>Manage <Icon name="arrow" size={13} /></button></div><div className="repo-summary-list">{state.repositories.map((repo) => <button key={repo.id} onClick={() => onView("Repositories")}><span className="repo-symbol">{repo.name.slice(0, 1).toUpperCase()}</span><span><strong>{repo.name}</strong><small>{repo.githubRepo}</small></span><span className="repo-summary-count">{state.tasks.filter((task) => task.repositoryId === repo.id).length} tasks</span></button>)}</div></section><section className="panel usage-summary"><div className="section-title-row"><h2>Usage</h2><button onClick={() => onView("Usage")}>Details <Icon name="arrow" size={13} /></button></div><div className="usage-ring-row"><div className="usage-ring" style={{ "--usage": `${state.usage.primaryRemaining ?? 0}%` } as React.CSSProperties}><strong>{state.usage.primaryRemaining ?? "—"}%</strong><span>remaining</span></div><div><strong>{formatPlanName(state.usage.plan)}</strong><span>{primaryWindow ? `${primaryWindow} window` : "Rate-limit window"}</span><small>Reset {state.usage.primaryReset ?? "unavailable"}</small></div></div><div className="usage-bar"><span style={{ width: `${state.usage.primaryRemaining ?? 0}%` }} /></div></section></div><section className="panel dashboard-activity"><div className="section-title-row"><h2>Recent activity</h2><span className="section-muted">{dirtyRepos} repos with active work</span></div><div className="activity-list">{state.activity.slice(0, 5).map((event) => { const task = state.tasks.find((candidate) => candidate.id === event.taskId); return <button key={event.id} onClick={() => task && onSelectTask(task.id)}><span className={`activity-icon activity-${event.type}`}><Icon name={event.type === "test" ? "test" : event.type === "approval" ? "approval" : event.type === "completed" ? "check" : "agent"} size={14} /></span><span><strong>{task?.displayId}</strong>{event.summary}</span><time>{timeAgo(event.timestamp)}</time></button>; })}</div></section></section>;
 }
 
 function RepositoryPage({ state, onAddRepository, onToggleRepository, onDiscover, discoveredRepositories, onAddDiscovered }: { state: AppState; onAddRepository: () => void; onToggleRepository: (id: string) => void; onDiscover: () => void; discoveredRepositories: DiscoveredRepository[]; onAddDiscovered: (repository: DiscoveredRepository) => void }) {
@@ -239,7 +301,11 @@ function ThreadsPage({ state, onSelectTask, onContinue }: { state: AppState; onS
 
 function UsagePage({ state }: { state: AppState }) {
   const usage = state.usage;
-  return <section className="page-section usage-page"><div className="page-heading-row"><div><h1>Usage</h1><span className="save-status">Account and rate-limit snapshots</span></div><span className="mock-label">{usage.isMock ? "Mock usage snapshot" : "Connected host"}</span></div>{usage.primaryRemaining == null && usage.secondaryRemaining == null && !usage.tokensToday ? <div className="empty-state panel"><Icon name="usage" size={24} /><strong>{usage.unavailableReason ?? "Usage information unavailable from connected Codex host."}</strong></div> : <><div className="usage-hero panel"><div><span className="usage-overline">Codex</span><h2>{usage.plan ?? "Account"}</h2><p>{usage.isMock ? "Mock rate-limit data is shown for offline UI development." : "Only values returned by the connected Codex host are shown."}</p></div><div className="usage-hero-value"><strong>{usage.primaryRemaining ?? "—"}%</strong><span>primary remaining</span></div></div><div className="usage-window-grid"><UsageWindow label="Primary window" remaining={usage.primaryRemaining} reset={usage.primaryReset} /><UsageWindow label="Secondary window" remaining={usage.secondaryRemaining} reset={usage.secondaryReset} /></div><div className="usage-stat-grid"><div className="panel"><span>Today</span><strong>{usage.tokensToday ?? "—"}</strong><small>tokens used</small></div><div className="panel"><span>Lifetime</span><strong>{usage.lifetimeTokens ?? "—"}</strong><small>tokens used</small></div><div className="panel"><span>Peak day</span><strong>{usage.peakDailyTokens ?? "—"}</strong><small>tokens used</small></div></div></>}</section>;
+  const usageUnavailable = usage.primaryRemaining == null && usage.secondaryRemaining == null && !usage.tokensToday;
+  const usagePending = state.settings.provider === "local" && state.host.status === "connecting";
+  const primaryWindow = formatWindowDuration(usage.primaryWindowDurationMins);
+  const secondaryWindow = formatWindowDuration(usage.secondaryWindowDurationMins);
+  return <section className="page-section usage-page"><div className="page-heading-row"><div><h1>Usage</h1><span className="save-status">Account and rate-limit snapshots</span></div><span className="mock-label">{usage.isMock ? "Mock usage snapshot" : "Connected host"}</span></div>{usageUnavailable ? <div className="empty-state panel"><Icon name="usage" size={24} /><strong>{usagePending ? "Waiting for local Codex usage data" : usage.unavailableReason ?? "Usage information unavailable from the connected Codex host."}</strong><span>{usagePending ? "The connected host will populate this view when its snapshot is ready." : "Check the bridge connection in Settings and try again."}</span></div> : <><div className="usage-hero panel"><div><span className="usage-overline">Codex</span><h2>{formatPlanName(usage.plan)}</h2><p>{usage.isMock ? "Mock rate-limit data is shown for offline UI development." : "Only values returned by the connected Codex host are shown."}</p></div><div className="usage-hero-value"><strong>{usage.primaryRemaining ?? "—"}%</strong><span>primary remaining</span></div></div><div className="usage-window-grid"><UsageWindow label={primaryWindow ? `${primaryWindow} primary window` : "Primary window"} remaining={usage.primaryRemaining} reset={usage.primaryReset} /><UsageWindow label={secondaryWindow ? `${secondaryWindow} secondary window` : "Secondary window"} remaining={usage.secondaryRemaining} reset={usage.secondaryReset} /></div><div className="usage-stat-grid"><div className="panel"><span>Today</span><strong>{usage.tokensToday ?? "—"}</strong><small>tokens used</small></div><div className="panel"><span>Lifetime</span><strong>{usage.lifetimeTokens ?? "—"}</strong><small>tokens used</small></div><div className="panel"><span>Peak day</span><strong>{usage.peakDailyTokens ?? "—"}</strong><small>tokens used</small></div></div></>}</section>;
 }
 
 function UsageWindow({ label, remaining, reset }: { label: string; remaining: number | null; reset: string | null }) {
@@ -334,9 +400,10 @@ export default function Home() {
       ...current,
       settings: { ...current.settings, provider },
       host: provider === "mock" ? { ...current.host, status: "offline", isMock: true, error: null } : { ...current.host, status: "connecting", isMock: false },
-      usage: provider === "mock" ? { ...current.usage, source: "mock", isMock: true } : { ...current.usage, source: "local", isMock: false, primaryRemaining: null, secondaryRemaining: null, primaryReset: null, secondaryReset: null, tokensToday: null, plan: null, unavailableReason: "Usage information unavailable until the local Codex bridge connects." },
+      usage: provider === "mock" ? { ...current.usage, source: "mock", isMock: true } : { ...current.usage, source: "local", isMock: false, primaryRemaining: null, secondaryRemaining: null, primaryReset: null, secondaryReset: null, primaryWindowDurationMins: null, secondaryWindowDurationMins: null, tokensToday: null, plan: null, unavailableReason: "Usage information unavailable until the local Codex bridge connects." },
       updatedAt: new Date().toISOString(),
     }), provider === "mock" ? "Mock adapter selected" : "Local Codex bridge selected");
+    if (provider === "local") void refreshLocalBridge();
   };
 
   const refreshLocalBridge = async () => {
@@ -357,6 +424,15 @@ export default function Home() {
         commit((current) => ({ ...current, host: { ...current.host, authenticated: account.authenticated ?? null, accountType: account.accountType ?? null, status: account.authenticated === false ? "auth_required" : current.host.status }, usage: { ...current.usage, plan: account.plan, source: "local", isMock: false }, updatedAt: new Date().toISOString() }));
       } catch {
         // Diagnostics remain useful when account data is unavailable.
+      }
+      try {
+        const [rateLimits, usage] = await Promise.all([adaptersRef.current.local.getRateLimits(), adaptersRef.current.local.getUsage()]);
+        const mappedUsage = mapUsageSnapshot(rateLimits, usage);
+        commit((current) => ({ ...current, usage: { ...current.usage, ...mappedUsage, source: "local", isMock: false }, updatedAt: new Date().toISOString() }));
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Usage data unavailable from the local Codex bridge.";
+        commit((current) => ({ ...current, usage: { ...current.usage, source: "local", isMock: false, unavailableReason: message }, updatedAt: new Date().toISOString() }));
+        notify(message);
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : "Local Codex bridge is unavailable.";

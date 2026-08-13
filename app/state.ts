@@ -113,6 +113,8 @@ export interface UsageSnapshot {
   secondaryRemaining: number | null;
   primaryReset: string | null;
   secondaryReset: string | null;
+  primaryWindowDurationMins?: number | null;
+  secondaryWindowDurationMins?: number | null;
   tokensToday: string | null;
   plan: string | null;
   isMock: boolean;
@@ -485,6 +487,8 @@ export function createSeedState(): AppState {
       secondaryRemaining: 81,
       primaryReset: "2h 14m",
       secondaryReset: "tomorrow 09:00",
+      primaryWindowDurationMins: 300,
+      secondaryWindowDurationMins: 10080,
       tokensToday: "18.4M",
       plan: "Codex Pro",
       isMock: true,
