@@ -122,6 +122,7 @@ const usageDateLabel = (date: string | null | undefined) => {
   const parsed = new Date(`${date}T00:00:00Z`);
   return Number.isNaN(parsed.getTime()) ? "Latest reported day" : `Reported ${new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", timeZone: "UTC" }).format(parsed)}`;
 };
+const USAGE_REFRESH_INTERVAL_MS = 60_000;
 
 const isSeedRepository = (repository: AppState["repositories"][number]) => repository.localPath.startsWith("/Users/me/");
 const isSeedTask = (task: Task) => /^task-(api|web|mob|inf)-\d+$/.test(task.id);
@@ -367,6 +368,7 @@ export default function Home() {
   const adapters = useMemo<Record<ExecutionProvider, CodexAdapter>>(() => ({ mock: new MockCodexAdapter(), local: new LocalCodexAdapter() }), []);
   const adaptersRef = useRef(adapters);
   const adapterRef = useRef<CodexAdapter>(adapters.mock);
+  const usageRefreshInFlightRef = useRef(false);
   const timersRef = useRef<Record<string, number[]>>({});
   const runTaskRef = useRef<(taskId: string) => void>(() => {});
   const [view, setView] = useState<View>("Board");
@@ -479,6 +481,25 @@ export default function Home() {
     }
   };
 
+  const refreshLocalUsage = async (notifyOnError = false) => {
+    if (stateRef.current.settings.provider !== "local" || usageRefreshInFlightRef.current) return;
+    usageRefreshInFlightRef.current = true;
+    try {
+      const rateLimits = await adaptersRef.current.local.getRateLimits();
+      const usage = await adaptersRef.current.local.getUsage();
+      if (stateRef.current.settings.provider !== "local") return;
+      const mappedUsage = mapUsageSnapshot(rateLimits, usage);
+      commit((current) => ({ ...current, usage: { ...current.usage, ...mappedUsage, source: "local", isMock: false }, updatedAt: new Date().toISOString() }));
+    } catch (error) {
+      if (stateRef.current.settings.provider !== "local") return;
+      const message = error instanceof Error ? error.message : "Usage data unavailable from the local Codex bridge.";
+      commit((current) => ({ ...current, usage: { ...current.usage, source: "local", isMock: false, unavailableReason: message }, updatedAt: new Date().toISOString() }));
+      if (notifyOnError) notify(message);
+    } finally {
+      usageRefreshInFlightRef.current = false;
+    }
+  };
+
   const refreshLocalBridge = async () => {
     if (stateRef.current.settings.provider !== "local") return notify("Select Local Codex bridge first");
     try {
@@ -498,15 +519,7 @@ export default function Home() {
       } catch {
         // Diagnostics remain useful when account data is unavailable.
       }
-      try {
-        const [rateLimits, usage] = await Promise.all([adaptersRef.current.local.getRateLimits(), adaptersRef.current.local.getUsage()]);
-        const mappedUsage = mapUsageSnapshot(rateLimits, usage);
-        commit((current) => ({ ...current, usage: { ...current.usage, ...mappedUsage, source: "local", isMock: false }, updatedAt: new Date().toISOString() }));
-      } catch (error) {
-        const message = error instanceof Error ? error.message : "Usage data unavailable from the local Codex bridge.";
-        commit((current) => ({ ...current, usage: { ...current.usage, source: "local", isMock: false, unavailableReason: message }, updatedAt: new Date().toISOString() }));
-        notify(message);
-      }
+      await refreshLocalUsage(true);
       try {
         await syncLocalRepositories();
       } catch (error) {
@@ -574,6 +587,7 @@ export default function Home() {
 
   useEffect(() => {
     if (!hydrated || state.settings.provider !== "local") return;
+    const usageTimer = window.setInterval(() => void refreshLocalUsage(), USAGE_REFRESH_INTERVAL_MS);
     let cancelled = false;
     void (async () => {
       try {
@@ -585,12 +599,13 @@ export default function Home() {
           const activity = activityFromStream(task.id, event);
           commit((current) => ({ ...current, tasks: current.tasks.map((candidate) => candidate.id === task.id ? { ...candidate, currentTurnId: event.turnId ?? candidate.currentTurnId, codexStatus: event.type === "approval" ? "waitingApproval" : event.type === "turn_completed" ? (event.status === "failed" ? "failed" : event.status === "interrupted" ? "interrupted" : "completed") : event.type === "error" ? "failed" : event.type === "turn_started" || event.type === "command" || event.type === "agent" || event.type === "file" ? "running" : candidate.codexStatus, status: event.type === "turn_completed" && event.status !== "failed" && event.status !== "interrupted" ? "Review" : candidate.status, lastActivityAt: now, updatedAt: now } : candidate), activity: [...current.activity, { ...activity, id: event.id, taskId: task.id, timestamp: event.timestamp }], updatedAt: now }));
           if (event.type === "thread_started" || event.type === "turn_completed") void refreshLocalThreads();
+          if (event.type === "turn_completed") void refreshLocalUsage();
         }
       } catch (error) {
         if (!cancelled) notify(error instanceof Error ? error.message : "Local Codex event stream ended");
       }
     })();
-    return () => { cancelled = true; };
+    return () => { cancelled = true; window.clearInterval(usageTimer); };
   }, [hydrated, state.settings.provider]);
 
   useEffect(() => {
