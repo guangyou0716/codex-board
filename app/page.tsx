@@ -368,6 +368,7 @@ export default function Home() {
   const adapters = useMemo<Record<ExecutionProvider, CodexAdapter>>(() => ({ mock: new MockCodexAdapter(), local: new LocalCodexAdapter() }), []);
   const adaptersRef = useRef(adapters);
   const adapterRef = useRef<CodexAdapter>(adapters.mock);
+  const modelsRefreshInFlightRef = useRef(false);
   const usageRefreshInFlightRef = useRef(false);
   const timersRef = useRef<Record<string, number[]>>({});
   const runTaskRef = useRef<(taskId: string) => void>(() => {});
@@ -405,11 +406,11 @@ export default function Home() {
     }
   };
 
-  const commit = (updater: (current: AppState) => AppState, message?: string) => {
+  const commit = (updater: (current: AppState) => AppState, message?: string, shouldPersist = true) => {
     const next = updater(stateRef.current);
     stateRef.current = next;
     setState(next);
-    void persist(next);
+    if (shouldPersist) void persist(next);
     if (message) notify(message);
   };
 
@@ -429,7 +430,7 @@ export default function Home() {
     if (provider === "local") void refreshLocalBridge();
   };
 
-  const syncLocalRepositories = async () => {
+  const syncLocalRepositories = async (shouldPersist = true) => {
     const discovered = await adaptersRef.current.local.listRepositories();
     const current = stateRef.current;
     const existingByPath = new Map(current.repositories.map((repository) => [repository.localPath, repository]));
@@ -463,7 +464,7 @@ export default function Home() {
     const next = { ...current, repositories: nextRepositories, tasks: nextTasks, activity: current.activity.filter((event) => taskIds.has(event.taskId)), updatedAt: new Date().toISOString() };
     stateRef.current = next;
     setState(next);
-    void persist(next);
+    if (shouldPersist) void persist(next);
     setDiscoveredRepositories([]);
     return discovered;
   };
@@ -489,46 +490,57 @@ export default function Home() {
       const usage = await adaptersRef.current.local.getUsage();
       if (stateRef.current.settings.provider !== "local") return;
       const mappedUsage = mapUsageSnapshot(rateLimits, usage);
-      commit((current) => ({ ...current, usage: { ...current.usage, ...mappedUsage, source: "local", isMock: false }, updatedAt: new Date().toISOString() }));
+      commit((current) => ({ ...current, usage: { ...current.usage, ...mappedUsage, source: "local", isMock: false }, updatedAt: new Date().toISOString() }), undefined, false);
     } catch (error) {
       if (stateRef.current.settings.provider !== "local") return;
       const message = error instanceof Error ? error.message : "Usage data unavailable from the local Codex bridge.";
-      commit((current) => ({ ...current, usage: { ...current.usage, source: "local", isMock: false, unavailableReason: message }, updatedAt: new Date().toISOString() }));
+      commit((current) => ({ ...current, usage: { ...current.usage, source: "local", isMock: false, unavailableReason: message }, updatedAt: new Date().toISOString() }), undefined, false);
       if (notifyOnError) notify(message);
     } finally {
       usageRefreshInFlightRef.current = false;
     }
   };
 
-  const refreshLocalBridge = async () => {
+  const refreshLocalModels = async () => {
+    if (stateRef.current.settings.provider !== "local" || modelsRefreshInFlightRef.current) return;
+    modelsRefreshInFlightRef.current = true;
+    try {
+      const localModels = await adaptersRef.current.local.getModels();
+      if (stateRef.current.settings.provider === "local") setModels(localModels);
+    } catch {
+      // Keep the last known model list available for task creation.
+    } finally {
+      modelsRefreshInFlightRef.current = false;
+    }
+  };
+
+  const refreshLocalWorkspace = async () => {
+    if (stateRef.current.settings.provider !== "local") return;
+    try {
+      await syncLocalRepositories(false);
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "Repository discovery unavailable");
+    }
+    await refreshLocalThreads();
+  };
+
+  const refreshLocalBridge = async (includeWorkspace = true) => {
     if (stateRef.current.settings.provider !== "local") return notify("Select Local Codex bridge first");
     try {
       const health = await adaptersRef.current.local.connect();
       if (!health) throw new Error("Local bridge did not return diagnostics.");
-      commit((current) => ({ ...current, host: { ...current.host, status: health.status === "online" ? "connected" : health.status === "degraded" && health.authenticated === false ? "auth_required" : health.status, isMock: false, version: health.codexVersion, bridgeVersion: health.bridgeVersion, codexVersion: health.codexVersion, platform: health.platform, hostname: health.hostname, lastSeen: health.lastSeenAt, capabilities: health.capabilities, approvedRoots: health.approvedRoots, authenticated: health.authenticated, accountType: health.accountType, error: health.error }, updatedAt: new Date().toISOString() }), health.status === "online" ? "Local Codex host connected" : health.error ?? "Local Codex host needs attention");
-      try {
-        const localModels = await adaptersRef.current.local.getModels();
-        setModels(localModels);
-        commit((current) => ({ ...current, host: { ...current.host, status: current.host.status, error: null }, updatedAt: new Date().toISOString() }));
-      } catch (error) {
-        notify(error instanceof Error ? error.message : "Model discovery unavailable");
-      }
+      commit((current) => ({ ...current, host: { ...current.host, status: health.status === "online" ? "connected" : health.status === "degraded" && health.authenticated === false ? "auth_required" : health.status, isMock: false, version: health.codexVersion, bridgeVersion: health.bridgeVersion, codexVersion: health.codexVersion, platform: health.platform, hostname: health.hostname, lastSeen: health.lastSeenAt, capabilities: health.capabilities, approvedRoots: health.approvedRoots, authenticated: health.authenticated, accountType: health.accountType, error: health.error }, updatedAt: new Date().toISOString() }), health.status === "online" ? "Local Codex host connected" : health.error ?? "Local Codex host needs attention", false);
       try {
         const account = await adaptersRef.current.local.getAccount();
-        commit((current) => ({ ...current, host: { ...current.host, authenticated: account.authenticated ?? null, accountType: account.accountType ?? null, status: account.authenticated === false ? "auth_required" : current.host.status }, usage: { ...current.usage, plan: account.plan, source: "local", isMock: false }, updatedAt: new Date().toISOString() }));
+        commit((current) => ({ ...current, host: { ...current.host, authenticated: account.authenticated ?? null, accountType: account.accountType ?? null, status: account.authenticated === false ? "auth_required" : current.host.status }, usage: { ...current.usage, plan: account.plan, source: "local", isMock: false }, updatedAt: new Date().toISOString() }), undefined, false);
       } catch {
         // Diagnostics remain useful when account data is unavailable.
       }
       await refreshLocalUsage(true);
-      try {
-        await syncLocalRepositories();
-      } catch (error) {
-        notify(error instanceof Error ? error.message : "Repository discovery unavailable");
-      }
-      await refreshLocalThreads();
+      if (includeWorkspace) await refreshLocalWorkspace();
     } catch (error) {
       const message = error instanceof Error ? error.message : "Local Codex bridge is unavailable.";
-      commit((current) => ({ ...current, host: { ...current.host, status: "offline", isMock: false, error: message }, updatedAt: new Date().toISOString() }));
+      commit((current) => ({ ...current, host: { ...current.host, status: "offline", isMock: false, error: message }, updatedAt: new Date().toISOString() }), undefined, false);
       notify(message);
     }
   };
@@ -551,6 +563,12 @@ export default function Home() {
     commit((current) => ({ ...current, repositories: [...current.repositories, repository], updatedAt: now }), `${repository.name} added to Codex Board`);
   };
 
+  const openTaskModal = (instant = false) => {
+    setModalInstant(instant);
+    setTaskModal(true);
+    void refreshLocalModels();
+  };
+
   useEffect(() => {
     let mounted = true;
     void (async () => {
@@ -564,7 +582,12 @@ export default function Home() {
           setState(loaded);
           setTheme(loaded.settings.theme);
           adapterRef.current = adaptersRef.current[loaded.settings.provider];
-          if (loaded.settings.provider === "local") void refreshLocalBridge();
+          if (loaded.settings.provider === "local") {
+            void refreshLocalBridge(false);
+            window.setTimeout(() => {
+              if (mounted && stateRef.current.settings.provider === "local") void refreshLocalWorkspace();
+            }, 1_200);
+          }
           if (loaded.settings.provider === "mock" && loaded.repositories.some(isSeedRepository)) {
             try {
               const health = await adaptersRef.current.local.connect();
@@ -618,7 +641,7 @@ export default function Home() {
       const isEditing = target?.tagName === "INPUT" || target?.tagName === "TEXTAREA" || target?.tagName === "SELECT";
       if (event.key === "Escape") { setSelectedTaskId(null); setTaskModal(false); setRepositoryModal(false); setDiff(null); return; }
       if (isEditing) return;
-      if (event.key.toLowerCase() === "n") { event.preventDefault(); setModalInstant(true); setTaskModal(true); }
+      if (event.key.toLowerCase() === "n") { event.preventDefault(); openTaskModal(true); }
       if (event.key === "/") { event.preventDefault(); document.querySelector<HTMLInputElement>("[data-search]")?.focus(); }
       if (event.key.toLowerCase() === "r" && selectedTaskId) { event.preventDefault(); runTaskRef.current(selectedTaskId); }
     };
@@ -817,8 +840,8 @@ export default function Home() {
     if (view === "Codex Threads") return <ThreadsPage state={state} threads={codexThreads} threadsLoading={threadsLoading} threadsError={threadsError} onSelectTask={setSelectedTaskId} onContinue={continueTask} onRefresh={() => void refreshLocalThreads()} />;
     if (view === "Usage") return <UsagePage state={state} />;
     if (view === "Settings") return <SettingsPage state={state} theme={theme} onTheme={() => { const nextTheme = theme === "dark" ? "light" : "dark"; setTheme(nextTheme); commit((current) => ({ ...current, settings: { ...current.settings, theme: nextTheme }, updatedAt: new Date().toISOString() }), "Theme preference updated"); }} onProvider={selectProvider} onApprovedRoots={updateRoots} onAddRoot={addRoot} onRefreshBridge={() => void refreshLocalBridge()} onDiscover={() => void discoverRepositories()} discoveredRepositories={discoveredRepositories} onAddDiscovered={addDiscoveredRepository} />;
-    return <BoardPage state={state} tasks={filteredTasks} filters={filters} onFilters={(next) => setFilters((current) => ({ ...current, ...next }))} onSelectTask={setSelectedTaskId} selectedTaskId={selectedTaskId} onAddTask={() => { setModalInstant(false); setTaskModal(true); }} onDragStart={setDragTaskId} onDrop={moveTask} />;
+    return <BoardPage state={state} tasks={filteredTasks} filters={filters} onFilters={(next) => setFilters((current) => ({ ...current, ...next }))} onSelectTask={setSelectedTaskId} selectedTaskId={selectedTaskId} onAddTask={() => openTaskModal()} onDragStart={setDragTaskId} onDrop={moveTask} />;
   };
 
-  return <div className={`app-shell ${hydrated ? "is-hydrated" : ""} ${theme === "light" ? "theme-light" : ""}`}><Sidebar view={view} onView={setView} state={state} onAddTask={() => { setModalInstant(false); setTaskModal(true); }} /><div className="app-frame"><TopBar state={state} view={view} onAddTask={() => { setModalInstant(false); setTaskModal(true); }} onView={setView} /><main className="main-content">{renderView()}</main></div><BottomNav view={view} onView={setView} />{selectedTask && <TaskDrawer state={state} task={selectedTask} repository={selectedRepository} models={models} diff={diff?.taskId === selectedTask.id ? diff.files : null} onClose={() => { setSelectedTaskId(null); setDiff(null); }} onUpdate={(updates) => updateTask(selectedTask.id, updates, "Task updated")} onRun={() => void runTask(selectedTask.id)} onContinue={() => void continueTask(selectedTask.id)} onStop={() => void stopTask(selectedTask.id)} onFork={() => forkTask(selectedTask.id)} onArchive={() => archiveTask(selectedTask.id)} onDelete={() => deleteTask(selectedTask.id)} onShowDiff={() => void openDiff(selectedTask)} onCloseDiff={() => setDiff(null)} onFeedback={(message) => { appendActivity(selectedTask.id, { type: "agent", summary: message }); notify(message); }} onSendMessage={(message) => void sendMessage(selectedTask.id, message)} onApproval={(requestId, decision) => void respondToApproval(selectedTask.id, requestId, decision)} onToast={notify} />}{taskModal && <TaskModal repositories={state.repositories} models={models} instant={modalInstant} onClose={() => setTaskModal(false)} onCreate={createTask} />}{repositoryModal && <RepositoryModal onClose={() => setRepositoryModal(false)} onCreate={createRepository} />}{toast && <div className="toast" role="status"><span className="status-dot is-mint" />{toast}</div>}<div className="save-indicator" aria-live="polite"><span className={`status-dot ${storageStatus === "demo" ? "is-amber" : storageStatus === "saving" ? "is-indigo" : "is-mint"}`} />{storageStatus === "demo" ? "Demo state" : storageStatus === "saving" ? "Saving" : "Saved"}</div></div>;
+  return <div className={`app-shell ${hydrated ? "is-hydrated" : ""} ${theme === "light" ? "theme-light" : ""}`}><Sidebar view={view} onView={setView} state={state} onAddTask={() => openTaskModal()} /><div className="app-frame"><TopBar state={state} view={view} onAddTask={() => openTaskModal()} onView={setView} /><main className="main-content">{renderView()}</main></div><BottomNav view={view} onView={setView} />{selectedTask && <TaskDrawer state={state} task={selectedTask} repository={selectedRepository} models={models} diff={diff?.taskId === selectedTask.id ? diff.files : null} onClose={() => { setSelectedTaskId(null); setDiff(null); }} onUpdate={(updates) => updateTask(selectedTask.id, updates, "Task updated")} onRun={() => void runTask(selectedTask.id)} onContinue={() => void continueTask(selectedTask.id)} onStop={() => void stopTask(selectedTask.id)} onFork={() => forkTask(selectedTask.id)} onArchive={() => archiveTask(selectedTask.id)} onDelete={() => deleteTask(selectedTask.id)} onShowDiff={() => void openDiff(selectedTask)} onCloseDiff={() => setDiff(null)} onFeedback={(message) => { appendActivity(selectedTask.id, { type: "agent", summary: message }); notify(message); }} onSendMessage={(message) => void sendMessage(selectedTask.id, message)} onApproval={(requestId, decision) => void respondToApproval(selectedTask.id, requestId, decision)} onToast={notify} />}{taskModal && <TaskModal repositories={state.repositories} models={models} instant={modalInstant} onClose={() => setTaskModal(false)} onCreate={createTask} />}{repositoryModal && <RepositoryModal onClose={() => setRepositoryModal(false)} onCreate={createRepository} />}{toast && <div className="toast" role="status"><span className="status-dot is-mint" />{toast}</div>}<div className="save-indicator" aria-live="polite"><span className={`status-dot ${storageStatus === "demo" ? "is-amber" : storageStatus === "saving" ? "is-indigo" : "is-mint"}`} />{storageStatus === "demo" ? "Demo state" : storageStatus === "saving" ? "Saving" : "Saved"}</div></div>;
 }
