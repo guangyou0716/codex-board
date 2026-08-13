@@ -148,7 +148,7 @@ export class LocalCodexAdapter implements CodexAdapter {
   async getAccount() {
     const response = await this.bridge.account();
     const account = response.account && typeof response.account === "object" ? response.account as Record<string, unknown> : null;
-    return { plan: typeof account?.planType === "string" ? account.planType : null, authenticated: !response.requiresOpenaiAuth && account !== null, accountType: typeof account?.type === "string" ? account.type : null };
+    return { plan: typeof account?.planType === "string" ? account.planType : null, authenticated: account !== null || !response.requiresOpenaiAuth, accountType: typeof account?.type === "string" ? account.type : null };
   }
   async getModels() { return (await this.bridge.models()).models; }
   getRateLimits() { return this.bridge.rateLimits(); }

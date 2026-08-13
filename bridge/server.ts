@@ -156,7 +156,7 @@ class BridgeService {
   async account() {
     const response = await this.codex.account();
     const account = response.account ? asRecord(response.account) : null;
-    this.authenticated = !response.requiresOpenaiAuth && account !== null;
+    this.authenticated = account !== null || !response.requiresOpenaiAuth;
     this.accountType = stringValue(account?.type);
     this.plan = stringValue(account?.planType);
     return response;
