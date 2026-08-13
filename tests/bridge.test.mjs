@@ -7,7 +7,7 @@ import test from "node:test";
 const { ApprovedRoots, PathSecurityError, isPathInside } = await import("../bridge/path-security.ts");
 const { RpcRequestManager } = await import("../bridge/rpc.ts");
 const { parseNumstat, parseUnifiedDiff } = await import("../bridge/git.ts");
-const { normalizeNotification } = await import("../bridge/codex-client.ts");
+const { normalizeNotification, normalizeThread } = await import("../bridge/codex-client.ts");
 
 test("approved roots canonicalize and reject escape paths", async () => {
   const root = await mkdtemp(path.join(process.cwd(), "work", "codex-board-approved-"));
@@ -56,4 +56,39 @@ test("App Server notifications normalize without breaking on unknown methods", (
   assert.equal(completed?.type, "turn_completed");
   assert.equal(completed?.threadId, "thread-a");
   assert.equal(unknown?.type, "unknown");
+});
+
+test("Codex thread metadata normalizes to a safe dashboard snapshot", () => {
+  const thread = normalizeThread({
+    id: "019abc",
+    extra: null,
+    sessionId: "session-1",
+    forkedFromId: null,
+    parentThreadId: null,
+    preview: "Inspect the bridge",
+    ephemeral: false,
+    isPinned: false,
+    historyMode: "normal",
+    modelProvider: "openai",
+    createdAt: 1_700_000_000,
+    updatedAt: 1_700_000_120,
+    recencyAt: 1_700_000_120,
+    status: { type: "active", activeFlags: [] },
+    path: null,
+    cwd: "C:\\approved\\repo",
+    cliVersion: "0.146.0",
+    source: "appServer",
+    canAcceptDirectInput: true,
+    threadSource: "codex-board",
+    agentNickname: null,
+    agentRole: null,
+    gitInfo: null,
+    name: null,
+    turns: [],
+  });
+
+  assert.equal(thread.id, "019abc");
+  assert.equal(thread.status, "running");
+  assert.equal(thread.cwd, "C:\\approved\\repo");
+  assert.equal(thread.updatedAt, "2023-11-14T22:15:20.000Z");
 });

@@ -1,4 +1,4 @@
-import type { DiscoveredRepository } from "./state";
+import type { CodexThread, DiscoveredRepository } from "./state";
 
 export interface BridgeHealth {
   status: "offline" | "connecting" | "online" | "degraded" | "error";
@@ -61,6 +61,7 @@ export class BridgeClient {
   rateLimits() { return request<unknown>("/v1/rate-limits"); }
   usage() { return request<unknown>("/v1/usage"); }
   repositories() { return request<{ repositories: DiscoveredRepository[] }>("/v1/repositories"); }
+  threads() { return request<{ threads: CodexThread[] }>("/v1/threads"); }
   repositoryStatus(path: string) { return request<DiscoveredRepository>("/v1/repositories/status", { method: "POST", body: JSON.stringify({ path }) }); }
   startThread(config: unknown) { return request<{ threadId: string; sessionId: string; cwd: string; model: string; reasoningEffort: string | null }>("/v1/threads", { method: "POST", body: JSON.stringify(config) }); }
   resumeThread(threadId: string, config: unknown) { return request<{ threadId: string; sessionId: string; cwd: string; model: string; reasoningEffort: string | null }>(`/v1/threads/${encodeURIComponent(threadId)}/resume`, { method: "POST", body: JSON.stringify({ config }) }); }

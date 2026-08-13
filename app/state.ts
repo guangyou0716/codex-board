@@ -22,6 +22,7 @@ export type CodexStatus =
   | "completed"
   | "failed"
   | "stopped";
+export type CodexThreadStatus = "idle" | "running" | "error" | "notLoaded" | "unknown";
 export type ActivityType =
   | "agent"
   | "command"
@@ -176,6 +177,24 @@ export interface DiscoveredRepository {
   dirty: boolean | null;
   lastCommit: string | null;
   lastSeen: string;
+}
+
+export interface CodexThread {
+  id: string;
+  sessionId: string;
+  forkedFromId: string | null;
+  name: string | null;
+  preview: string;
+  cwd: string;
+  modelProvider: string;
+  status: CodexThreadStatus;
+  isPinned: boolean;
+  createdAt: string;
+  updatedAt: string;
+  recencyAt: string | null;
+  source: string;
+  threadSource: string | null;
+  canAcceptDirectInput: boolean | null;
 }
 
 const ago = (minutes: number) =>

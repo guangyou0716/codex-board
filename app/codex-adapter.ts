@@ -1,6 +1,7 @@
 import { BridgeClient, type BridgeHealth, type BridgeStreamEvent } from "./bridge-client";
 import type {
   ActivityEvent,
+  CodexThread,
   DiscoveredRepository,
   ExecutionProvider,
   ModelOption,
@@ -52,6 +53,7 @@ export interface CodexAdapter {
   getRateLimits(): Promise<unknown>;
   getUsage(): Promise<unknown>;
   listRepositories(): Promise<Repository[]>;
+  listThreads(): Promise<CodexThread[]>;
   getRepositoryStatus(repository: Repository): Promise<unknown>;
   startThread(config: CodexThreadConfig): Promise<{ threadId: string; sessionId: string }>;
   resumeThread(threadId: string, config: CodexThreadConfig): Promise<void>;
@@ -82,6 +84,7 @@ export class MockCodexAdapter implements CodexAdapter {
   async getRateLimits() { return { primaryRemaining: 68, secondaryRemaining: 81 }; }
   async getUsage() { return { tokensToday: "18.4M" }; }
   async listRepositories() { return []; }
+  async listThreads() { return []; }
   async getRepositoryStatus(repository: Repository) { return { repositoryId: repository.id, status: "unknown" }; }
   async startThread() {
     const suffix = Math.random().toString(36).slice(2, 8);
@@ -154,6 +157,7 @@ export class LocalCodexAdapter implements CodexAdapter {
   getRateLimits() { return this.bridge.rateLimits(); }
   getUsage() { return this.bridge.usage(); }
   async listRepositories() { return (await this.bridge.repositories()).repositories.map(mapRepository); }
+  async listThreads() { return (await this.bridge.threads()).threads; }
   getRepositoryStatus(repository: Repository) { return this.bridge.repositoryStatus(repository.localPath); }
   async startThread(config: CodexThreadConfig) {
     const result = await this.bridge.startThread(config);

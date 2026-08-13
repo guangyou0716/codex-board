@@ -14,6 +14,7 @@ import {
   TASK_STATUSES,
   type ActivityEvent,
   type AppState,
+  type CodexThread,
   type DiscoveredRepository,
   type ExecutionProvider,
   type ModelOption,
@@ -116,6 +117,11 @@ const formatWindowDuration = (minutes: number | null | undefined) => {
   if (minutes % 60 === 0) return `${minutes / 60}-hour`;
   return `${minutes}-minute`;
 };
+
+const isSeedRepository = (repository: AppState["repositories"][number]) => repository.localPath.startsWith("/Users/me/");
+const isSeedTask = (task: Task) => /^task-(api|web|mob|inf)-\d+$/.test(task.id);
+const threadTitle = (thread: CodexThread) => thread.name?.trim() || thread.preview?.trim() || `Thread ${thread.id.slice(0, 8)}`;
+const pathName = (value: string) => value.split(/[\\/]/).filter(Boolean).pop() ?? value;
 
 function mapUsageSnapshot(rateLimits: unknown, usage: unknown): Partial<UsageSnapshot> {
   const ratePayload = asRecord(rateLimits);
@@ -294,9 +300,10 @@ function RepositoryPage({ state, onAddRepository, onToggleRepository, onDiscover
   return <section className="page-section repository-page"><div className="page-heading-row"><div><h1>Repositories</h1><span className="save-status">{state.repositories.length} local repositories</span></div><div className="page-actions"><button className="secondary-button pressable" onClick={onDiscover}><Icon name="search" size={15} />Discover</button><button className="primary-button pressable" onClick={onAddRepository}><Icon name="plus" size={16} />Add repository</button></div></div><div className="security-callout"><Icon name="shield" size={17} /><span><strong>Approved roots only.</strong> The local bridge validates every path before it can read or write a repository.</span><button>Review settings <Icon name="arrow" size={13} /></button></div>{discoveredRepositories.length > 0 && <section className="panel discovered-panel"><div className="section-title-row"><h2>Discovered locally</h2><span className="section-muted">Nothing is added automatically</span></div><div className="discovered-list">{discoveredRepositories.map((repository) => <div key={repository.localPath}><span><strong>{repository.name}</strong><code>{repository.localPath}</code></span><button className="secondary-button pressable" onClick={() => onAddDiscovered(repository)}>Add to board</button></div>)}</div></section>}<div className="repo-table panel">{state.repositories.map((repo) => <div className="repo-row" key={repo.id}><span className="repo-symbol repo-symbol--large">{repo.name.slice(0, 1).toUpperCase()}</span><span className="repo-name"><strong>{repo.name}</strong><small className="repo-path">{repo.localPath}</small></span><span className="repo-github">{repo.githubRepo || "No remote linked"}</span><span className="repo-branch"><span className="branch-dot" />{repo.currentBranch ?? repo.defaultBranch}</span><span className="repo-tags">{repo.tags.slice(0, 2).map((tag) => <span key={tag}>{tag}</span>)}</span><span className={`repo-state ${repo.enabled ? "is-enabled" : "is-disabled"}`}><span className="status-dot" />{repo.enabled ? "Enabled" : "Disabled"}</span><button className="row-more" aria-label={`Toggle ${repo.name}`} onClick={() => onToggleRepository(repo.id)}><Icon name="more" size={17} /></button></div>)}</div><div className="repo-footnote"><Icon name="clock" size={14} />{state.settings.provider === "local" ? "Repository data comes from the local bridge when available." : "Select the local bridge to discover repositories on this computer."}</div></section>;
 }
 
-function ThreadsPage({ state, onSelectTask, onContinue }: { state: AppState; onSelectTask: (id: string) => void; onContinue: (id: string) => void }) {
-  const threads = state.tasks.filter((task) => task.codexThreadId);
-  return <section className="page-section threads-page"><div className="page-heading-row"><div><h1>Codex Threads</h1><span className="save-status">One primary thread per task</span></div><span className="mock-label">{state.settings.provider === "mock" ? "Mock adapter" : "Local bridge"}</span></div><div className="threads-table panel"><div className="thread-table-head"><span>Task</span><span>Repository</span><span>Thread</span><span>Model</span><span>Reasoning</span><span>Status</span><span>Last activity</span><span /></div>{threads.map((task) => <div className="thread-row" key={task.id}><button className="thread-task" onClick={() => onSelectTask(task.id)}><strong>{task.displayId}</strong><span>{task.title}</span></button><span>{getRepository(state, task.repositoryId)?.name}</span><code>{task.codexThreadId}</code><span>{task.modelName}</span><span>{formatEffort(task.reasoningEffort)}</span><span className={`thread-status status-${task.codexStatus}`}><span className="status-dot" />{task.codexStatus}</span><span>{timeAgo(task.lastActivityAt ?? task.updatedAt)}</span><button className="icon-button" aria-label={`Continue ${task.displayId}`} onClick={() => onContinue(task.id)}><Icon name="arrow" size={15} /></button></div>)}</div>{threads.length === 0 && <div className="empty-state panel"><Icon name="threads" size={24} /><strong>No Codex threads yet</strong><span>Run a task to create its first persistent thread association.</span></div>}</section>;
+function ThreadsPage({ state, threads, threadsLoading, threadsError, onSelectTask, onContinue, onRefresh }: { state: AppState; threads: CodexThread[]; threadsLoading: boolean; threadsError: string | null; onSelectTask: (id: string) => void; onContinue: (id: string) => void; onRefresh: () => void }) {
+  const local = state.settings.provider === "local";
+  const taskThreads = state.tasks.filter((task) => task.codexThreadId);
+  return <section className="page-section threads-page"><div className="page-heading-row"><div><h1>Codex Threads</h1><span className="save-status">{local ? "Live threads from the local Codex runtime" : "One primary thread per task"}</span></div>{local ? <button className="secondary-button pressable" onClick={onRefresh}><Icon name="clock" size={15} />Refresh</button> : <span className="mock-label">Mock adapter</span>}</div>{local && threadsError && <div className="bridge-inline-error" role="status"><span className="status-dot is-amber" />{threadsError}</div>}<div className="threads-table panel"><div className="thread-table-head"><span>Task</span><span>Repository</span><span>Thread</span><span>Model</span><span>Reasoning</span><span>Status</span><span>Last activity</span><span /></div>{local ? threads.map((thread) => { const task = state.tasks.find((candidate) => candidate.codexThreadId === thread.id); const repository = state.repositories.find((candidate) => candidate.localPath === thread.cwd); const status = thread.status === "error" ? "failed" : thread.status; return <div className="thread-row" key={thread.id}><span className={`thread-task thread-task--plain ${task ? "is-linked" : ""}`}>{task ? <button className="thread-task" onClick={() => onSelectTask(task.id)}><strong>{task.displayId}</strong><span>{task.title}</span></button> : <><strong>THREAD</strong><span>{threadTitle(thread)}</span></>}</span><span>{repository?.name ?? pathName(thread.cwd)}</span><code>{thread.id}</code><span>{task?.modelName ?? thread.modelProvider}</span><span>{task ? formatEffort(task.reasoningEffort) : "—"}</span><span className={`thread-status status-${status}`}><span className="status-dot" />{status}</span><span>{timeAgo(thread.updatedAt)}</span>{task ? <button className="icon-button" aria-label={`Continue ${task.displayId}`} onClick={() => onContinue(task.id)}><Icon name="arrow" size={15} /></button> : <span className="thread-unlinked">—</span>}</div>; }) : taskThreads.map((task) => <div className="thread-row" key={task.id}><button className="thread-task" onClick={() => onSelectTask(task.id)}><strong>{task.displayId}</strong><span>{task.title}</span></button><span>{getRepository(state, task.repositoryId)?.name}</span><code>{task.codexThreadId}</code><span>{task.modelName}</span><span>{formatEffort(task.reasoningEffort)}</span><span className={`thread-status status-${task.codexStatus}`}><span className="status-dot" />{task.codexStatus}</span><span>{timeAgo(task.lastActivityAt ?? task.updatedAt)}</span><button className="icon-button" aria-label={`Continue ${task.displayId}`} onClick={() => onContinue(task.id)}><Icon name="arrow" size={15} /></button></div>)}</div>{local && threadsLoading ? <div className="empty-state panel"><Icon name="threads" size={24} /><strong>Loading live Codex threads</strong><span>Reading thread metadata from the connected local runtime.</span></div> : local && threads.length === 0 && !threadsError ? <div className="empty-state panel"><Icon name="threads" size={24} /><strong>No persisted Codex threads in the approved roots</strong><span>Run a task to create a real thread, or use the refresh action after opening Codex elsewhere.</span></div> : !local && taskThreads.length === 0 ? <div className="empty-state panel"><Icon name="threads" size={24} /><strong>No Codex threads yet</strong><span>Run a task to create its first persistent thread association.</span></div> : null}</section>;
 }
 
 function UsagePage({ state }: { state: AppState }) {
@@ -359,6 +366,9 @@ export default function Home() {
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [filters, setFilters] = useState({ search: "", repo: "all", status: "all", priority: "all", model: "all", effort: "all", execution: "all" });
   const [models, setModels] = useState<ModelOption[]>(MOCK_MODELS);
+  const [codexThreads, setCodexThreads] = useState<CodexThread[]>([]);
+  const [threadsLoading, setThreadsLoading] = useState(false);
+  const [threadsError, setThreadsError] = useState<string | null>(null);
   const [discoveredRepositories, setDiscoveredRepositories] = useState<DiscoveredRepository[]>([]);
   const [hydrated, setHydrated] = useState(false);
   const [storageStatus, setStorageStatus] = useState<"saving" | "saved" | "demo">("saved");
@@ -396,6 +406,10 @@ export default function Home() {
 
   const selectProvider = (provider: ExecutionProvider) => {
     adapterRef.current = adaptersRef.current[provider];
+    if (provider === "mock") {
+      setCodexThreads([]);
+      setThreadsError(null);
+    }
     commit((current) => ({
       ...current,
       settings: { ...current.settings, provider },
@@ -404,6 +418,58 @@ export default function Home() {
       updatedAt: new Date().toISOString(),
     }), provider === "mock" ? "Mock adapter selected" : "Local Codex bridge selected");
     if (provider === "local") void refreshLocalBridge();
+  };
+
+  const syncLocalRepositories = async () => {
+    const discovered = await adaptersRef.current.local.listRepositories();
+    const current = stateRef.current;
+    const existingByPath = new Map(current.repositories.map((repository) => [repository.localPath, repository]));
+    const discoveredPaths = new Set(discovered.map((repository) => repository.localPath));
+    const repositories = discovered.map((repository) => {
+      const existing = existingByPath.get(repository.localPath);
+      const now = new Date().toISOString();
+      return {
+        id: existing?.id ?? idFor("repo"),
+        name: repository.name,
+        localPath: repository.localPath,
+        githubRepo: repository.remote ?? "",
+        defaultBranch: repository.defaultBranch ?? repository.currentBranch ?? "main",
+        enabled: existing?.enabled ?? true,
+        tags: existing?.tags ?? [],
+        createdAt: existing?.createdAt ?? now,
+        updatedAt: now,
+        connectionState: "connected" as const,
+        currentBranch: repository.currentBranch,
+        remote: repository.remote,
+        dirty: repository.dirty,
+        lastCommit: repository.lastCommit,
+        lastSeen: repository.lastSeen,
+      };
+    });
+    const retainedRepositories = current.repositories.filter((repository) => !isSeedRepository(repository) && !discoveredPaths.has(repository.localPath));
+    const nextRepositories = [...repositories, ...retainedRepositories];
+    const repositoryIds = new Set(nextRepositories.map((repository) => repository.id));
+    const nextTasks = current.tasks.filter((task) => !isSeedTask(task) && repositoryIds.has(task.repositoryId));
+    const taskIds = new Set(nextTasks.map((task) => task.id));
+    const next = { ...current, repositories: nextRepositories, tasks: nextTasks, activity: current.activity.filter((event) => taskIds.has(event.taskId)), updatedAt: new Date().toISOString() };
+    stateRef.current = next;
+    setState(next);
+    void persist(next);
+    setDiscoveredRepositories([]);
+    return discovered;
+  };
+
+  const refreshLocalThreads = async () => {
+    if (stateRef.current.settings.provider !== "local") return;
+    setThreadsLoading(true);
+    setThreadsError(null);
+    try {
+      setCodexThreads(await adaptersRef.current.local.listThreads());
+    } catch (error) {
+      setThreadsError(error instanceof Error ? error.message : "Live Codex threads are unavailable from the local bridge.");
+    } finally {
+      setThreadsLoading(false);
+    }
   };
 
   const refreshLocalBridge = async () => {
@@ -434,6 +500,12 @@ export default function Home() {
         commit((current) => ({ ...current, usage: { ...current.usage, source: "local", isMock: false, unavailableReason: message }, updatedAt: new Date().toISOString() }));
         notify(message);
       }
+      try {
+        await syncLocalRepositories();
+      } catch (error) {
+        notify(error instanceof Error ? error.message : "Repository discovery unavailable");
+      }
+      await refreshLocalThreads();
     } catch (error) {
       const message = error instanceof Error ? error.message : "Local Codex bridge is unavailable.";
       commit((current) => ({ ...current, host: { ...current.host, status: "offline", isMock: false, error: message }, updatedAt: new Date().toISOString() }));
@@ -444,10 +516,8 @@ export default function Home() {
   const discoverRepositories = async () => {
     if (stateRef.current.settings.provider !== "local") return notify("Select Local Codex bridge to discover repositories");
     try {
-      const discovered = await adaptersRef.current.local.listRepositories();
-      const simplified = discovered.map((repository) => ({ name: repository.name, localPath: repository.localPath, remote: (repository.remote ?? repository.githubRepo) || null, currentBranch: repository.currentBranch ?? null, defaultBranch: repository.defaultBranch ?? null, dirty: repository.dirty ?? null, lastCommit: repository.lastCommit ?? null, lastSeen: repository.lastSeen ?? new Date().toISOString() }));
-      setDiscoveredRepositories(simplified);
-      notify(`${simplified.length} repositories discovered`);
+      const discovered = await syncLocalRepositories();
+      notify(`${discovered.length} repositories synced from the local bridge`);
     } catch (error) {
       notify(error instanceof Error ? error.message : "Repository discovery unavailable");
     }
@@ -475,6 +545,14 @@ export default function Home() {
           setTheme(loaded.settings.theme);
           adapterRef.current = adaptersRef.current[loaded.settings.provider];
           if (loaded.settings.provider === "local") void refreshLocalBridge();
+          if (loaded.settings.provider === "mock" && loaded.repositories.some(isSeedRepository)) {
+            try {
+              const health = await adaptersRef.current.local.connect();
+              if (mounted && stateRef.current.settings.provider === "mock" && health?.status === "online") selectProvider("local");
+            } catch {
+              // Keep the mock fallback when no local bridge is available.
+            }
+          }
         }
       } catch {
         if (mounted) setStorageStatus("demo");
@@ -499,6 +577,7 @@ export default function Home() {
           const now = new Date().toISOString();
           const activity = activityFromStream(task.id, event);
           commit((current) => ({ ...current, tasks: current.tasks.map((candidate) => candidate.id === task.id ? { ...candidate, currentTurnId: event.turnId ?? candidate.currentTurnId, codexStatus: event.type === "approval" ? "waitingApproval" : event.type === "turn_completed" ? (event.status === "failed" ? "failed" : event.status === "interrupted" ? "interrupted" : "completed") : event.type === "error" ? "failed" : event.type === "turn_started" || event.type === "command" || event.type === "agent" || event.type === "file" ? "running" : candidate.codexStatus, status: event.type === "turn_completed" && event.status !== "failed" && event.status !== "interrupted" ? "Review" : candidate.status, lastActivityAt: now, updatedAt: now } : candidate), activity: [...current.activity, { ...activity, id: event.id, taskId: task.id, timestamp: event.timestamp }], updatedAt: now }));
+          if (event.type === "thread_started" || event.type === "turn_completed") void refreshLocalThreads();
         }
       } catch (error) {
         if (!cancelled) notify(error instanceof Error ? error.message : "Local Codex event stream ended");
@@ -564,6 +643,7 @@ export default function Home() {
       try {
         const turn = await adapterRef.current.startTurn(thread.threadId, config, `${task.description}\n\nAcceptance criteria:\n${task.acceptanceCriteria.map((criterion) => `- ${criterion}`).join("\n")}`);
         if (turn.turnId) updateTask(taskId, { currentTurnId: turn.turnId, lastActivityAt: new Date().toISOString() });
+        void refreshLocalThreads();
       } catch (error) {
         updateTask(taskId, { status: "Blocked", codexStatus: "failed", testStatus: "Failed to start turn" });
         appendActivity(taskId, { type: "error", summary: error instanceof Error ? error.message : "Codex turn could not be started" });
@@ -624,6 +704,7 @@ export default function Home() {
     }
     const fork: Task = { ...source, id: idFor("task"), displayId: `${source.displayId}-F`, title: `${source.title} (fork)`, status: "Ready", codexThreadId: forkedThread.threadId, codexSessionId: forkedThread.sessionId, currentTurnId: null, forkedFromThreadId: forkedThread.forkedFromId ?? source.codexThreadId, codexStatus: "idle", startedAt: null, completedAt: null, testStatus: null, usage: null, sortOrder: Math.max(...stateRef.current.tasks.map((task) => task.sortOrder), 0) + 1, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
     commit((current) => ({ ...current, tasks: [...current.tasks, fork], updatedAt: new Date().toISOString() }), "Forked task without changing the primary thread");
+    if (stateRef.current.settings.provider === "local") void refreshLocalThreads();
     setSelectedTaskId(fork.id);
   };
 
@@ -691,6 +772,7 @@ export default function Home() {
       const result = await adapterRef.current.startTurn(task.codexThreadId, config, message);
       result.events.forEach((event) => appendActivity(taskId, event));
       updateTask(taskId, { status: "Running", codexStatus: "running", currentTurnId: result.turnId, lastActivityAt: new Date().toISOString(), updatedAt: new Date().toISOString() }, stateRef.current.settings.provider === "mock" ? "Follow-up sent to mock thread" : "Follow-up sent to Codex thread");
+      if (stateRef.current.settings.provider === "local") void refreshLocalThreads();
       if (stateRef.current.settings.provider === "mock") window.setTimeout(() => { updateTask(taskId, { status: "Review", codexStatus: "completed", currentTurnId: null, testStatus: "Follow-up complete" }); appendActivity(taskId, { type: "completed", summary: "Follow-up turn complete" }); }, 1_900);
     } catch (error) {
       notify(error instanceof Error ? error.message : "Follow-up turn failed");
@@ -710,7 +792,7 @@ export default function Home() {
   const renderView = () => {
     if (view === "Dashboard") return <DashboardPage state={state} onView={setView} onSelectTask={setSelectedTaskId} />;
     if (view === "Repositories") return <RepositoryPage state={state} onAddRepository={() => setRepositoryModal(true)} onToggleRepository={(id) => commit((current) => ({ ...current, repositories: current.repositories.map((repository) => repository.id === id ? { ...repository, enabled: !repository.enabled, updatedAt: new Date().toISOString() } : repository), updatedAt: new Date().toISOString() }), "Repository state updated")} onDiscover={() => void discoverRepositories()} discoveredRepositories={discoveredRepositories} onAddDiscovered={addDiscoveredRepository} />;
-    if (view === "Codex Threads") return <ThreadsPage state={state} onSelectTask={setSelectedTaskId} onContinue={continueTask} />;
+    if (view === "Codex Threads") return <ThreadsPage state={state} threads={codexThreads} threadsLoading={threadsLoading} threadsError={threadsError} onSelectTask={setSelectedTaskId} onContinue={continueTask} onRefresh={() => void refreshLocalThreads()} />;
     if (view === "Usage") return <UsagePage state={state} />;
     if (view === "Settings") return <SettingsPage state={state} theme={theme} onTheme={() => { const nextTheme = theme === "dark" ? "light" : "dark"; setTheme(nextTheme); commit((current) => ({ ...current, settings: { ...current.settings, theme: nextTheme }, updatedAt: new Date().toISOString() }), "Theme preference updated"); }} onProvider={selectProvider} onApprovedRoots={updateRoots} onAddRoot={addRoot} onRefreshBridge={() => void refreshLocalBridge()} onDiscover={() => void discoverRepositories()} discoveredRepositories={discoveredRepositories} onAddDiscovered={addDiscoveredRepository} />;
     return <BoardPage state={state} tasks={filteredTasks} filters={filters} onFilters={(next) => setFilters((current) => ({ ...current, ...next }))} onSelectTask={setSelectedTaskId} selectedTaskId={selectedTaskId} onAddTask={() => { setModalInstant(false); setTaskModal(true); }} onDragStart={setDragTaskId} onDrop={moveTask} />;

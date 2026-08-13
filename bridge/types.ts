@@ -18,6 +18,26 @@ export interface BridgeRepository {
   lastSeen: string;
 }
 
+export type BridgeThreadStatus = "idle" | "running" | "error" | "notLoaded" | "unknown";
+
+export interface BridgeThread {
+  id: string;
+  sessionId: string;
+  forkedFromId: string | null;
+  name: string | null;
+  preview: string;
+  cwd: string;
+  modelProvider: string;
+  status: BridgeThreadStatus;
+  isPinned: boolean;
+  createdAt: string;
+  updatedAt: string;
+  recencyAt: string | null;
+  source: string;
+  threadSource: string | null;
+  canAcceptDirectInput: boolean | null;
+}
+
 export interface BridgeDiagnostics {
   status: BridgeConnectionStatus;
   bridgeVersion: string;

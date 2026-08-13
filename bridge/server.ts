@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { hostname, platform } from "node:os";
 import { pathToFileURL, URL } from "node:url";
-import { ApprovedRoots, loadApprovedRoots, PathSecurityError } from "./path-security.ts";
+import { ApprovedRoots, isPathInside, loadApprovedRoots, PathSecurityError } from "./path-security.ts";
 import { discoverRepositories, readDiff, readRepository } from "./git.ts";
 import { AppServerProcess, type AppServerServerRequest } from "./app-server.ts";
 import { CodexAppServerClient } from "./codex-client.ts";
@@ -19,6 +19,7 @@ const CAPABILITIES = [
   "account/rateLimits/read",
   "account/usage/read",
   "model/list",
+  "thread/list",
   "thread/start",
   "thread/resume",
   "thread/fork",
@@ -182,6 +183,20 @@ class BridgeService {
     return repositories;
   }
 
+  async threads() {
+    const threads = await this.codex.listThreads();
+    const approvedThreads = await Promise.all(threads.map(async (thread) => {
+      if (!this.roots.list().some((root) => isPathInside(root, thread.cwd))) return null;
+      try {
+        await this.roots.resolve(thread.cwd);
+        return thread;
+      } catch {
+        return null;
+      }
+    }));
+    return approvedThreads.filter((thread): thread is NonNullable<typeof thread> => thread !== null);
+  }
+
   repositoryStatus(path: string) {
     return readRepository(this.roots, path);
   }
@@ -315,6 +330,10 @@ export async function createBridgeServer() {
       if (url.pathname === "/v1/repositories/status" && request.method === "POST") {
         const input = asRecord(await body(request));
         sendJson(response, 200, await service.repositoryStatus(String(input.path ?? "")), origin, origins);
+        return;
+      }
+      if (url.pathname === "/v1/threads" && request.method === "GET") {
+        sendJson(response, 200, { threads: await service.threads() }, origin, origins);
         return;
       }
       if (url.pathname === "/v1/diff" && request.method === "GET") {

@@ -271,3 +271,9 @@ h1 { font-size: 28px; line-height: 1.1; letter-spacing: -.055em; font-weight: 66
 .discovered-list code { display: block; max-width: 250px; overflow: hidden; margin-top: 3px; color: var(--muted); font-family: var(--font-mono-ui); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
 .approval-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; margin-top: 8px; }
 .approval-actions > span { width: 100%; color: var(--muted); font-size: 10px; }
+.bridge-inline-error { display: flex; align-items: center; gap: 8px; margin: -4px 0 12px; padding: 9px 11px; border: 1px solid color-mix(in srgb, var(--amber) 28%, var(--border)); border-radius: 6px; background: color-mix(in srgb, var(--amber) 7%, var(--surface)); color: var(--muted); font-size: 11px; }
+.thread-task--plain { cursor: default; }
+.thread-task--plain.is-linked { display: block; padding: 0; }
+.thread-task--plain > strong { color: var(--accent); font-family: var(--font-mono-ui); font-size: 10px; }
+.thread-task--plain > span { display: block; margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.thread-unlinked { color: var(--faint); text-align: center; }

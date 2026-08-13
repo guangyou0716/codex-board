@@ -2,8 +2,8 @@
 
 Phase 2 adds a local-only bridge for the Codex Board UI. It owns one long-lived
 `codex app-server --stdio` child process and exposes structured localhost
-actions for diagnostics, model/account discovery, persistent threads, turns,
-approvals, repository discovery, and read-only Git status/diff.
+actions for diagnostics, model/account discovery, persistent thread listing and
+turns, approvals, repository discovery, and read-only Git status/diff.
 
 ## Start
 
@@ -20,8 +20,8 @@ development/production allowlist when the private Site URL changes.
 
 The bridge refuses filesystem roots, a blanket home directory, credential or
 system directories, path traversal, symlink escapes, and repositories outside
-the approved roots. Repository operations are read-only. There is no generic
-shell endpoint.
+the approved roots. Repository and thread-list operations are read-only. There
+is no generic shell endpoint.
 
 ## Protocol upgrades
 

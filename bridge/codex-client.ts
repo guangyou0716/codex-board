@@ -1,5 +1,7 @@
 import type { ModelListResponse } from "./generated/codex-app-server/v2/ModelListResponse.ts";
 import type { ThreadForkResponse } from "./generated/codex-app-server/v2/ThreadForkResponse.ts";
+import type { Thread } from "./generated/codex-app-server/v2/Thread.ts";
+import type { ThreadListResponse } from "./generated/codex-app-server/v2/ThreadListResponse.ts";
 import type { ThreadReadResponse } from "./generated/codex-app-server/v2/ThreadReadResponse.ts";
 import type { ThreadResumeResponse } from "./generated/codex-app-server/v2/ThreadResumeResponse.ts";
 import type { ThreadStartResponse } from "./generated/codex-app-server/v2/ThreadStartResponse.ts";
@@ -7,7 +9,7 @@ import type { TurnStartResponse } from "./generated/codex-app-server/v2/TurnStar
 import type { GetAccountResponse } from "./generated/codex-app-server/v2/GetAccountResponse.ts";
 import type { GetAccountRateLimitsResponse } from "./generated/codex-app-server/v2/GetAccountRateLimitsResponse.ts";
 import type { GetAccountTokenUsageResponse } from "./generated/codex-app-server/v2/GetAccountTokenUsageResponse.ts";
-import type { BridgeEvent, BridgeModel, BridgeTaskConfig } from "./types.ts";
+import type { BridgeEvent, BridgeModel, BridgeTaskConfig, BridgeThread, BridgeThreadStatus } from "./types.ts";
 import { AppServerProcess } from "./app-server.ts";
 import type { RpcMessage } from "./rpc.ts";
 
@@ -37,6 +39,37 @@ const sandboxPolicy = (config: BridgeTaskConfig) => {
 };
 
 const threadStartSandbox = (config: BridgeTaskConfig) => config.sandboxMode === "readOnly" ? "read-only" : "workspace-write";
+
+const threadTimestamp = (value: number | null) => value == null ? null : new Date(value * 1000).toISOString();
+const threadSource = (value: unknown) => {
+  if (typeof value === "string") return value;
+  if (value && typeof value === "object") {
+    const key = Object.keys(value as Record<string, unknown>)[0];
+    return key ?? "unknown";
+  }
+  return "unknown";
+};
+const threadStatus = (value: Thread["status"]): BridgeThreadStatus => value.type === "active" ? "running" : value.type === "systemError" ? "error" : value.type;
+
+export function normalizeThread(thread: Thread): BridgeThread {
+  return {
+    id: thread.id,
+    sessionId: thread.sessionId,
+    forkedFromId: thread.forkedFromId,
+    name: thread.name,
+    preview: thread.preview,
+    cwd: String(thread.cwd),
+    modelProvider: thread.modelProvider,
+    status: threadStatus(thread.status),
+    isPinned: thread.isPinned,
+    createdAt: threadTimestamp(thread.createdAt) ?? new Date(0).toISOString(),
+    updatedAt: threadTimestamp(thread.updatedAt) ?? new Date(0).toISOString(),
+    recencyAt: threadTimestamp(thread.recencyAt),
+    source: threadSource(thread.source),
+    threadSource: thread.threadSource,
+    canAcceptDirectInput: thread.canAcceptDirectInput,
+  };
+}
 
 export function normalizeItem(item: unknown, threadId?: string, turnId?: string): BridgeEvent | null {
   const candidate = asRecord(item);
@@ -125,6 +158,25 @@ export class CodexAppServerClient {
       cursor = response.nextCursor;
     } while (cursor);
     return models;
+  }
+
+  async listThreads(): Promise<BridgeThread[]> {
+    const threads: BridgeThread[] = [];
+    let cursor: string | null = null;
+    for (let page = 0; page < 20; page += 1) {
+      const response: ThreadListResponse = await this.process.request<ThreadListResponse>("thread/list", {
+        cursor,
+        limit: 100,
+        sortKey: "updated_at",
+        sortDirection: "desc",
+        archived: false,
+        useStateDbOnly: true,
+      });
+      threads.push(...response.data.map(normalizeThread));
+      cursor = response.nextCursor;
+      if (!cursor) break;
+    }
+    return threads;
   }
 
   account() {
