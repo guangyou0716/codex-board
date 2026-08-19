@@ -2,6 +2,7 @@
 
 import {
   useEffect,
+  useEffectEvent,
   useMemo,
   useRef,
   useState,
@@ -574,6 +575,13 @@ export default function Home() {
     void refreshLocalModels();
   };
 
+  const commitEvent = useEffectEvent(commit);
+  const selectProviderEvent = useEffectEvent(selectProvider);
+  const refreshLocalUsageEvent = useEffectEvent(refreshLocalUsage);
+  const refreshLocalWorkspaceEvent = useEffectEvent(refreshLocalWorkspace);
+  const refreshLocalBridgeEvent = useEffectEvent(refreshLocalBridge);
+  const openTaskModalEvent = useEffectEvent(openTaskModal);
+
   useEffect(() => {
     let mounted = true;
     void (async () => {
@@ -588,15 +596,15 @@ export default function Home() {
           setTheme(loaded.settings.theme);
           adapterRef.current = adaptersRef.current[loaded.settings.provider];
           if (loaded.settings.provider === "local") {
-            void refreshLocalBridge(false);
+            void refreshLocalBridgeEvent(false);
             window.setTimeout(() => {
-              if (mounted && stateRef.current.settings.provider === "local") void refreshLocalWorkspace();
+              if (mounted && stateRef.current.settings.provider === "local") void refreshLocalWorkspaceEvent();
             }, 1_200);
           }
           if (loaded.settings.provider === "mock" && loaded.repositories.some(isSeedRepository)) {
             try {
               const health = await adaptersRef.current.local.connect();
-              if (mounted && stateRef.current.settings.provider === "mock" && health?.status === "online") selectProvider("local");
+              if (mounted && stateRef.current.settings.provider === "mock" && health?.status === "online") selectProviderEvent("local");
             } catch {
               // Keep the mock fallback when no local bridge is available.
             }
@@ -615,7 +623,7 @@ export default function Home() {
 
   useEffect(() => {
     if (!hydrated || state.settings.provider !== "local") return;
-    const usageTimer = window.setInterval(() => void refreshLocalUsage(), USAGE_REFRESH_INTERVAL_MS);
+    const usageTimer = window.setInterval(() => void refreshLocalUsageEvent(), USAGE_REFRESH_INTERVAL_MS);
     let cancelled = false;
     void (async () => {
       try {
@@ -625,9 +633,9 @@ export default function Home() {
           if (!task) continue;
           const now = new Date().toISOString();
           const activity = activityFromStream(task.id, event);
-          commit((current) => ({ ...current, tasks: current.tasks.map((candidate) => candidate.id === task.id ? { ...candidate, currentTurnId: event.turnId ?? candidate.currentTurnId, codexStatus: event.type === "approval" ? "waitingApproval" : event.type === "turn_completed" ? (event.status === "failed" ? "failed" : event.status === "interrupted" ? "interrupted" : "completed") : event.type === "error" ? "failed" : event.type === "turn_started" || event.type === "command" || event.type === "agent" || event.type === "file" ? "running" : candidate.codexStatus, status: event.type === "turn_completed" && event.status !== "failed" && event.status !== "interrupted" ? "Review" : candidate.status, lastActivityAt: now, updatedAt: now } : candidate), activity: [...current.activity, { ...activity, id: event.id, taskId: task.id, timestamp: event.timestamp }], updatedAt: now }));
+          commitEvent((current) => ({ ...current, tasks: current.tasks.map((candidate) => candidate.id === task.id ? { ...candidate, currentTurnId: event.turnId ?? candidate.currentTurnId, codexStatus: event.type === "approval" ? "waitingApproval" : event.type === "turn_completed" ? (event.status === "failed" ? "failed" : event.status === "interrupted" ? "interrupted" : "completed") : event.type === "error" ? "failed" : event.type === "turn_started" || event.type === "command" || event.type === "agent" || event.type === "file" ? "running" : candidate.codexStatus, status: event.type === "turn_completed" && event.status !== "failed" && event.status !== "interrupted" ? "Review" : candidate.status, lastActivityAt: now, updatedAt: now } : candidate), activity: [...current.activity, { ...activity, id: event.id, taskId: task.id, timestamp: event.timestamp }], updatedAt: now }));
           if (event.type === "thread_started" || event.type === "turn_completed") void refreshLocalThreads();
-          if (event.type === "turn_completed") void refreshLocalUsage();
+          if (event.type === "turn_completed") void refreshLocalUsageEvent();
         }
       } catch (error) {
         if (!cancelled) notify(error instanceof Error ? error.message : "Local Codex event stream ended");
@@ -646,7 +654,7 @@ export default function Home() {
       const isEditing = target?.tagName === "INPUT" || target?.tagName === "TEXTAREA" || target?.tagName === "SELECT";
       if (event.key === "Escape") { setSelectedTaskId(null); setTaskModal(false); setRepositoryModal(false); setDiff(null); return; }
       if (isEditing) return;
-      if (event.key.toLowerCase() === "n") { event.preventDefault(); openTaskModal(true); }
+      if (event.key.toLowerCase() === "n") { event.preventDefault(); openTaskModalEvent(true); }
       if (event.key === "/") { event.preventDefault(); document.querySelector<HTMLInputElement>("[data-search]")?.focus(); }
       if (event.key.toLowerCase() === "r" && selectedTaskId) { event.preventDefault(); runTaskRef.current(selectedTaskId); }
     };
