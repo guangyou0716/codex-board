@@ -245,7 +245,7 @@ function TopBar({ state, view, onAddTask, onView }: { state: AppState; view: Vie
     <div className="mobile-brand"><BrandMark /><span>Codex Board</span></div>
     <div className="topbar-context"><span className="topbar-eyebrow">Workspace</span><strong>{view}</strong></div>
     <div className="topbar-actions"><HostBadge state={state} /><span className="account-pill"><span className="account-avatar">CP</span><span>{formatPlanName(state.usage.plan)}</span><Icon name="chevron" size={14} /></span><button className="topbar-add pressable" onClick={onAddTask}><Icon name="plus" size={16} /><span>Add task</span></button></div>
-    <button className="mobile-menu" aria-label="Open navigation" onClick={() => onView(view === "Board" ? "Dashboard" : "Board")}><Icon name="menu" /></button>
+    <button className="mobile-menu" aria-label={view === "Board" ? "Open dashboard" : "Open board"} onClick={() => onView(view === "Board" ? "Dashboard" : "Board")}><Icon name="menu" /></button>
   </header>;
 }
 
