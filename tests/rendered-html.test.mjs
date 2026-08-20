@@ -3,6 +3,8 @@ import { access, readFile } from "node:fs/promises";
 import test from "node:test";
 
 const projectRoot = new URL("../", import.meta.url);
+const { createLatestSnapshotQueue, reorderTasks } = await import("../app/board-utils.ts");
+const { createSeedState } = await import("../app/state.ts");
 
 async function render() {
   const workerUrl = new URL("../dist/server/index.js", import.meta.url);
@@ -65,4 +67,56 @@ test("keeps the private dashboard boundary explicit", async () => {
 
   await assert.rejects(access(new URL("app/_sites-preview/SkeletonPreview.tsx", projectRoot)));
   await assert.rejects(access(new URL("app/_sites-preview/preview.css", projectRoot)));
+});
+
+test("keeps only the newest pending save and supports keyboard task reorder", async () => {
+  const writes = [];
+  const releases = [];
+  const idle = [];
+  const queue = createLatestSnapshotQueue(async (snapshot) => {
+    writes.push(snapshot);
+    await new Promise((resolve) => releases.push(resolve));
+  }, (error) => { throw error; }, () => idle.push("saved"));
+
+  queue.enqueue("first");
+  queue.enqueue("newest");
+  assert.deepEqual(writes, ["first"]);
+  assert.deepEqual(idle, []);
+  releases.shift()();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(writes, ["first", "newest"]);
+  assert.deepEqual(idle, []);
+  releases.shift()();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(idle, ["saved"]);
+
+  const failureWrites = [];
+  const errors = [];
+  const recovered = [];
+  let rejectOlder;
+  let resolveNewer;
+  const failureQueue = createLatestSnapshotQueue(async (snapshot) => {
+    failureWrites.push(snapshot);
+    if (snapshot === "older") {
+      await new Promise((resolve, reject) => { rejectOlder = reject; });
+      return;
+    }
+    await new Promise((resolve) => { resolveNewer = resolve; });
+  }, (error) => errors.push(error.message), () => recovered.push("saved"));
+
+  failureQueue.enqueue("older");
+  failureQueue.enqueue("newer");
+  rejectOlder(new Error("older failed"));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(failureWrites, ["older", "newer"]);
+  assert.deepEqual(errors, ["older failed"]);
+  assert.deepEqual(recovered, []);
+  resolveNewer();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(recovered, ["saved"]);
+
+  const tasks = createSeedState().tasks;
+  const ready = tasks.filter((task) => task.status === "Ready").sort((a, b) => a.sortOrder - b.sortOrder);
+  const reordered = reorderTasks(tasks, ready[1].id, "Ready", ready[0].id);
+  assert.equal(reordered.filter((task) => task.status === "Ready").sort((a, b) => a.sortOrder - b.sortOrder)[0].id, ready[1].id);
 });
