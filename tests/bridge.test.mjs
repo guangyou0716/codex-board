@@ -10,6 +10,7 @@ const { parseNumstat, parseUnifiedDiff } = await import("../bridge/git.ts");
 const { CodexAppServerClient, normalizeNotification, normalizeThread } = await import("../bridge/codex-client.ts");
 
 test("approved roots canonicalize and reject escape paths", async () => {
+  await mkdir(path.join(process.cwd(), "work"), { recursive: true });
   const root = await mkdtemp(path.join(process.cwd(), "work", "codex-board-approved-"));
   const repo = path.join(root, "repo");
   await mkdir(path.join(repo, ".git"), { recursive: true });
